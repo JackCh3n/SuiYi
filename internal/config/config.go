@@ -17,6 +17,7 @@ type Config struct {
 	ClipboardEnabled bool   `json:"clipboard_enabled"`  // 剪贴板自动翻译开关
 	Autostart        bool   `json:"autostart"`          // 开机自启（Windows 注册表 Run 键）
 	NCTX             int    `json:"n_ctx"`              // 推理上下文长度（长文本需加大）
+	NGL              int    `json:"ngl"`                // GPU 层数（0=纯 CPU；Vulkan 版可设 99 全量 GPU）
 	Token            string `json:"token"`              // 可选鉴权 token（空=不鉴权）
 	Backend          string `json:"backend"`            // "local"（本地 llama）或 "openai"（OpenAI 兼容 API）
 	OpenAIBaseURL    string `json:"openai_base_url"`    // OpenAI 兼容 API 基地址（含 /v1）

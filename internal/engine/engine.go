@@ -316,7 +316,7 @@ func (e *Engine) Stop() error {
 	// window 下先发终止信号
 	if e.cmd != nil && e.cmd.Process != nil {
 		_ = e.cmd.Process.Kill()
-		_ = e.cmd.Wait()
+		// 不在此处 Wait：由 reap 协程负责收割，避免并发 Wait 竞态
 	}
 	if e.logFile != nil {
 		_ = e.logFile.Close()

@@ -53,9 +53,12 @@ textarea{width:100%;min-height:120px;resize:vertical;line-height:1.6}
 .btn.danger:hover{background:#d92c2c}
 .quick-tabs{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}
 .qt-label{font-size:12px;color:var(--sub)}
-.qt{cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--sub);padding:4px 12px;border-radius:16px;font-size:12px}
+.qt{cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--sub);padding:4px 12px;border-radius:16px;font-size:12px;display:inline-flex;align-items:center;gap:4px}
 .qt:hover{color:var(--primary);border-color:var(--primary)}
 .qt.active{background:var(--primary-bg);color:var(--primary);border-color:var(--primary);font-weight:500}
+.lc{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;color:#fff;font-size:10px;font-weight:600;flex-shrink:0;line-height:1}
+.lc-zh{background:#de2910}.lc-en{background:#003399}.lc-ja{background:#fff;color:#d32011;border:1px solid #d32011}.lc-ko{background:#cd2e3a}.lc-auto{background:#666}
+.qt .arrow{color:var(--sub);font-size:11px}
 .out{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;min-height:120px;font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
 .meta{font-size:12px;color:var(--sub);margin-top:8px}
 .hint{font-size:12px;color:var(--sub);margin-bottom:8px}
@@ -141,11 +144,11 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     <div class="card translate-card">
       <div class="quick-tabs">
         <span class="qt-label">快捷：</span>
-        <button class="qt" data-src="zh" data-dst="en">🇨🇳 → 🇬🇧 中英</button>
-        <button class="qt" data-src="en" data-dst="zh">🇬🇧 → 🇨🇳 英中</button>
-        <button class="qt" data-src="ja" data-dst="zh">🇯🇵 → 🇨🇳 日中</button>
-        <button class="qt" data-src="ko" data-dst="zh">🇰🇷 → 🇨🇳 韩中</button>
-        <button class="qt" data-src="" data-dst="zh">🔍 → 🇨🇳 自动</button>
+        <button class="qt" data-src="zh" data-dst="en"><span class="lc lc-zh">中</span><span class="arrow">→</span><span class="lc lc-en">英</span></button>
+        <button class="qt" data-src="en" data-dst="zh"><span class="lc lc-en">英</span><span class="arrow">→</span><span class="lc lc-zh">中</span></button>
+        <button class="qt" data-src="ja" data-dst="zh"><span class="lc lc-ja">日</span><span class="arrow">→</span><span class="lc lc-zh">中</span></button>
+        <button class="qt" data-src="ko" data-dst="zh"><span class="lc lc-ko">韩</span><span class="arrow">→</span><span class="lc lc-zh">中</span></button>
+        <button class="qt" data-src="" data-dst="zh"><span class="lc lc-auto">?</span><span class="arrow">→</span><span class="lc lc-zh">中</span></button>
       </div>
       <div class="langbar">
         <select id="srcLang" title="原文语言">
@@ -253,6 +256,10 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       <div class="set-row">
         <div class="set-left"><h4>上下文长度（n_ctx）</h4><p>长文本翻译需加大；越大内存占用越高，修改后重启生效</p></div>
         <input type="text" id="cfgNctx" style="width:120px" inputmode="numeric">
+      </div>
+      <div class="set-row">
+        <div class="set-left"><h4>GPU 层数（ngl）</h4><p>0=纯 CPU；Vulkan 版设 99 全量 GPU 加速（Radeon 780M 等），改后重启生效</p></div>
+        <input type="text" id="cfgNgl" style="width:120px" inputmode="numeric">
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
         <button class="btn ghost" id="btnReset">恢复默认</button>
@@ -492,6 +499,32 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     try{ srcText.value = await navigator.clipboard.readText(); srcText.dispatchEvent(new Event('input')); }
     catch(e){ toast('无法读取剪贴板：' + e.message); }
   };
+  // 拖拽上传 txt 文本到原文框（纯前端）
+  ['dragover','dragenter'].forEach(ev => srcText.addEventListener(ev, e => {
+    e.preventDefault();
+    srcText.style.outline = '2px dashed var(--primary)';
+  }));
+  ['dragleave','drop'].forEach(ev => srcText.addEventListener(ev, e => {
+    e.preventDefault();
+    srcText.style.outline = '';
+  }));
+  srcText.addEventListener('drop', e => {
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if(!file){ return; }
+    if(!/\.txt$/i.test(file.name) && file.type !== 'text/plain'){
+      toast('请拖入 .txt 文本文件'); return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      srcText.value = reader.result;
+      $('#charCount').textContent = srcText.value.length + ' 字';
+      updateDetect();
+      clearTimeout(debounce);
+      if(autoToggle.checked) setTimeout(doTranslate, 200);
+      toast('已载入 ' + file.name + '（' + srcText.value.length + ' 字）');
+    };
+    reader.readAsText(file, 'utf-8');
+  });
   $('#copyBtn').onclick = async () => {
     const t = resultText.textContent;
     if(!t || t.startsWith('错误') || t.startsWith('请求失败')) return;
@@ -580,6 +613,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       $('#cfgAutostart').checked = !!d.autostart;
       $('#cfgPort').value = d.api_port || 8848;
       $('#cfgNctx').value = d.n_ctx || 8192;
+      $('#cfgNgl').value = d.ngl || 0;
       $('#cfgBackend').value = d.backend || 'local';
       $('#cfgOpenAIBase').value = d.openai_base_url || '';
       $('#cfgOpenAIKey').value = d.openai_key || '';
@@ -596,6 +630,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     $('#cfgAutostart').checked = false;
     $('#cfgPort').value = 8848;
     $('#cfgNctx').value = 8192;
+    $('#cfgNgl').value = 0;
     $('#cfgBackend').value = 'local';
     $('#cfgOpenAIBase').value = 'https://api.openai.com/v1';
     $('#cfgOpenAIKey').value = '';
@@ -614,6 +649,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           autostart: $('#cfgAutostart').checked,
           api_port: parseInt($('#cfgPort').value) || 8848,
           n_ctx: parseInt($('#cfgNctx').value) || 8192,
+          ngl: parseInt($('#cfgNgl').value) || 0,
           model_path: $('#cfgModel').value.trim(),
           backend: $('#cfgBackend').value,
           openai_base_url: $('#cfgOpenAIBase').value.trim(),

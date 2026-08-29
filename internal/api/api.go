@@ -85,7 +85,33 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/config", s.handleConfig)
 	mux.HandleFunc("/logs", s.handleLogs)
 	mux.HandleFunc("/", s.handleWeb)
-	return mux
+	// 配置了 token 时：除 Web 界面外的 API 需要鉴权（同源放行 / Bearer / ?token=）
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.authOK(r) {
+			writeJSON(w, 401, map[string]string{"error": "未授权：需要 token"})
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+// authOK 鉴权：未配置 token 直接放行；配置后允许同源（Web 管理界面）、Bearer token 或 ?token=
+func (s *Server) authOK(r *http.Request) bool {
+	if s.cfg.Token == "" {
+		return true
+	}
+	if r.URL.Path == "/" {
+		return true // Web 界面本身
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		if strings.HasPrefix(origin, "http://127.0.0.1:") || strings.HasPrefix(origin, "http://localhost:") {
+			return true
+		}
+	}
+	if r.Header.Get("Authorization") == "Bearer "+s.cfg.Token {
+		return true
+	}
+	return r.URL.Query().Get("token") == s.cfg.Token
 }
 
 // Listen 监听并服务
@@ -376,6 +402,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			ClipboardEnabled *bool   `json:"clipboard_enabled"`
 			Autostart        *bool   `json:"autostart"`
 			NCTX             *int    `json:"n_ctx"`
+			NGL              *int    `json:"ngl"`
 			Token            *string `json:"token"`
 			Backend          *string `json:"backend"`
 			OpenAIBaseURL    *string `json:"openai_base_url"`
@@ -414,6 +441,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.NCTX != nil {
 			s.cfg.NCTX = *patch.NCTX
+		}
+		if patch.NGL != nil {
+			s.cfg.NGL = *patch.NGL
 		}
 		if patch.Token != nil {
 			s.cfg.Token = *patch.Token

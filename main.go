@@ -53,6 +53,9 @@ func runServe(args []string) int {
 	if *port != 0 {
 		cfg.APIPort = *port
 	}
+	if *ngl != 0 {
+		cfg.NGL = *ngl
+	}
 	cfg.Headless = *headless
 
 	fmt.Printf("随译 SuiYi v%s · 推理后端 %s · 模型 %s\n", version, cfg.Backend, config.Resolve(cfg.ModelPath))
@@ -67,7 +70,8 @@ func runServe(args []string) int {
 			ModelPath:  cfg.ModelPath,
 			EnginePath: cfg.EnginePath,
 			SaveMemory: cfg.SaveMemory,
-			NGL:        *ngl,
+			NGL:        cfg.NGL,
+			NCTX:       cfg.NCTX,
 		})
 		if err := eng.Start(context.Background()); err != nil {
 			fmt.Fprintln(os.Stderr, "启动推理引擎失败:", err)
