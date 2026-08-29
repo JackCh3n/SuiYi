@@ -30,7 +30,7 @@ func NewOpenAI(baseURL, key, model string) *OpenAI {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		key:     key,
 		model:   model,
-		client:  &http.Client{Timeout: 90 * time.Second},
+		client:  &http.Client{}, // 超时由 Complete 的 context 控制
 	}
 }
 
@@ -43,7 +43,7 @@ func (o *OpenAI) Complete(ctx context.Context, r ChatRequest) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, 300*time.Second) // 长文本翻译可能较久
 	defer cancel()
 	req, err := http.NewRequestWithContext(cctx, http.MethodPost, o.baseURL+"/chat/completions", bytes.NewReader(raw))
 	if err != nil {

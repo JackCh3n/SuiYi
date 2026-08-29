@@ -7,6 +7,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -51,8 +53,10 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/translate", s.handleTranslate)
+	mux.HandleFunc("/translate/stream", s.handleTranslateStream)
 	mux.HandleFunc("/batch", s.handleBatch)
 	mux.HandleFunc("/languages", s.handleLanguages)
+	mux.HandleFunc("/models", s.handleModels)
 	mux.HandleFunc("/config", s.handleConfig)
 	mux.HandleFunc("/logs", s.handleLogs)
 	mux.HandleFunc("/", s.handleWeb)
@@ -168,6 +172,87 @@ func (s *Server) handleTranslate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// StreamJob 流式翻译任务（由队列 worker 调用后端流式生成，逐块写回）
+type StreamJob struct {
+	Req      *TranslateRequest                                  // 请求
+	Emit     func(string) error                                 // 每段增量内容回调；返回错误则中止
+	Progress func(pct float64, stage string, eta int, tps float64) // 进度回调：pct 0~1，eta 预计剩余秒（-1=未知），tps 生成速度
+}
+
+// writeSSE 输出一条 SSE 事件
+func writeSSE(w http.ResponseWriter, v any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "data: %s\n\n", raw)
+	return err
+}
+
+// handleTranslateStream 流式单句翻译（text/event-stream，逐段增量返回）
+func (s *Server) handleTranslateStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "仅支持 POST"})
+		return
+	}
+	var req TranslateRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "请求体无效: " + err.Error()})
+		return
+	}
+	if strings.TrimSpace(req.Text) == "" {
+		writeJSON(w, 400, map[string]string{"error": "text 不能为空"})
+		return
+	}
+	target := req.Target
+	if target == "" {
+		target = s.cfg.TargetLang
+	}
+	req.Target = target
+
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	flusher, _ := w.(http.Flusher)
+	_ = writeSSE(w, map[string]any{"start": true, "source": req.Source, "target": target})
+	if flusher != nil {
+		flusher.Flush()
+	}
+
+	emit := func(chunk string) error {
+		if err := writeSSE(w, map[string]any{"delta": chunk}); err != nil {
+			return err
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		return nil
+	}
+	progress := func(pct float64, stage string, eta int, tps float64) {
+		_ = writeSSE(w, map[string]any{"progress": pct, "stage": stage, "eta": eta, "tps": tps})
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	done := s.q.Submit(&queue.Job{Type: "translate-stream", Args: &StreamJob{Req: &req, Emit: emit, Progress: progress}})
+	select {
+	case res := <-done:
+		if err, ok := res.(error); ok {
+			s.addLog("流式翻译失败: %v", err)
+			_ = writeSSE(w, map[string]any{"error": err.Error()})
+		} else {
+			s.addLog("流式翻译: %q (%s→%s)", truncate(req.Text, 30), req.Source, target)
+			_ = writeSSE(w, map[string]any{"done": true, "source": req.Source, "target": target})
+		}
+	case <-r.Context().Done():
+		_ = writeSSE(w, map[string]any{"error": "客户端断开"})
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
+}
+
 // BatchRequest 批量翻译请求
 type BatchRequest struct {
 	Items  []TranslateRequest `json:"items"`
@@ -223,6 +308,39 @@ func (s *Server) handleLanguages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, Languages)
 }
 
+// handleModels 列出 models 目录下的 GGUF 模型文件（供 Web 下拉选择/刷新）
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"models": listModels()})
+}
+
+// listModels 扫描「工作目录 / 可执行文件目录」下的 models/ 目录，返回 .gguf 列表
+func listModels() []map[string]string {
+	seen := map[string]bool{}
+	var out []map[string]string
+	add := func(dir string) {
+		if dir == "" {
+			return
+		}
+		matches, err := filepath.Glob(filepath.Join(dir, "*.gguf"))
+		if err != nil {
+			return
+		}
+		for _, m := range matches {
+			rel := filepath.ToSlash(filepath.Join("models", filepath.Base(m)))
+			if seen[rel] {
+				continue
+			}
+			seen[rel] = true
+			out = append(out, map[string]string{"name": filepath.Base(m), "path": rel})
+		}
+	}
+	if wd, err := os.Getwd(); err == nil {
+		add(filepath.Join(wd, "models"))
+	}
+	add(filepath.Join(config.ExeDir(), "models"))
+	return out
+}
+
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -236,6 +354,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			TargetLang       *string `json:"target_lang"`
 			SaveMemory       *bool   `json:"save_memory"`
 			ClipboardEnabled *bool   `json:"clipboard_enabled"`
+			NCTX             *int    `json:"n_ctx"`
 			Token            *string `json:"token"`
 			Backend          *string `json:"backend"`
 			OpenAIBaseURL    *string `json:"openai_base_url"`
@@ -267,6 +386,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if patch.ClipboardEnabled != nil {
 			s.cfg.ClipboardEnabled = *patch.ClipboardEnabled
 		}
+		if patch.NCTX != nil {
+			s.cfg.NCTX = *patch.NCTX
+		}
 		if patch.Token != nil {
 			s.cfg.Token = *patch.Token
 		}
@@ -295,8 +417,24 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	writeJSON(w, 200, map[string]any{"logs": s.logs})
+	logs := append([]string{}, s.logs...)
+	s.mu.Unlock()
+	// 追加本地 llama-server 引擎日志尾部（OpenAI 后端无此文件则忽略）
+	engineLog := tailFile(filepath.Join(config.ExeDir(), "data", "engine.log"), 200)
+	writeJSON(w, 200, map[string]any{"logs": logs, "engine": engineLog})
+}
+
+// tailFile 读取文件末尾最多 n 行
+func tailFile(path string, n int) []string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines
 }
 
 // handleWeb 内嵌管理界面

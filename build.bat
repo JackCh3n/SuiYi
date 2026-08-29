@@ -1,34 +1,37 @@
 @echo off
-chcp 65001 >nul
 REM ============================================================
-REM 随译 SuiYi 本地构建脚本
-REM   [1] 终止运行中的服务进程（suiyi.exe / llama-server.exe）
-REM   [2] 构建 build\suiyi.exe
-REM   [3] 启动服务并打开浏览器
+REM SuiYi local build script
+REM   [1] Kill running service processes (suiyi.exe / llama-server.exe)
+REM   [2] Build build\suiyi.exe
+REM   [3] Start service and open browser
+REM NOTE: keep this file pure ASCII to avoid codepage issues
+REM NOTE: use powershell Start-Sleep instead of timeout (timeout
+REM       fails with "Input redirection is not supported" when
+REM       stdin is redirected)
 REM ============================================================
 setlocal
 
 cd /d "%~dp0"
 
-echo [1/3] 终止运行中的 suiyi / llama-server 进程...
+echo [1/3] Killing running suiyi / llama-server processes...
 taskkill /F /IM suiyi.exe /T >nul 2>&1
 taskkill /F /IM llama-server.exe /T >nul 2>&1
-timeout /t 1 /nobreak >nul
+powershell -NoProfile -Command "Start-Sleep -Milliseconds 800" >nul 2>&1
 
-echo [2/3] 构建 build\suiyi.exe ...
+echo [2/3] Building build\suiyi.exe ...
 if not exist build mkdir build
 go build -trimpath -ldflags "-s -w" -o build\suiyi.exe .
 if errorlevel 1 (
-  echo 构建失败！请检查 Go 环境与代码。
+  echo Build FAILED. Check Go toolchain and code.
   pause
   exit /b 1
 )
-echo 构建完成: build\suiyi.exe
+echo Built: build\suiyi.exe
 
-echo [3/3] 启动服务并打开浏览器...
+echo [3/3] Starting service and opening browser...
 start "SuiYi" "build\suiyi.exe" serve
-timeout /t 3 /nobreak >nul
+powershell -NoProfile -Command "Start-Sleep -Seconds 3" >nul 2>&1
 start "" http://127.0.0.1:8848
 
-echo 完成。管理界面: http://127.0.0.1:8848
+echo Done. Web UI: http://127.0.0.1:8848
 endlocal

@@ -97,6 +97,10 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
 .translate-foot{display:flex;align-items:center;justify-content:space-between;margin-top:14px;gap:10px}
 .translate-foot .hint{margin:0}
 .auto-toggle{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);cursor:pointer}
+.prog{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.prog-bar{flex:1;height:6px;background:var(--bg);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.prog-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--primary),#00b42a);transition:width .3s}
+.prog-text{font-size:12px;color:var(--sub);white-space:nowrap;min-width:150px;text-align:right}
 @media(max-width:760px){.panes{flex-direction:column}.pane-box textarea,.pane-box .out{min-height:160px}}
 @media(max-width:640px){.wrap{padding:14px}.header{padding:12px 16px}.right .pill{display:none}}
 </style>
@@ -134,6 +138,10 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
         </select>
         <button class="swap-btn" id="swapBtn" title="交换语言">⇄</button>
         <select id="dstLang" title="目标语言"></select>
+      </div>
+      <div class="prog" id="progWrap" style="display:none">
+        <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
+        <span class="prog-text" id="progText"></span>
       </div>
       <div class="panes">
         <div class="pane-box">
@@ -224,8 +232,11 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
         <select id="cfgTarget" style="width:200px"></select>
       </div>
       <div class="set-row">
-        <div class="set-left"><h4>模型文件路径</h4><p>本地后端使用的 GGUF 模型（相对可执行文件目录）</p></div>
-        <input type="text" class="set-input" id="cfgModel" placeholder="models/Hy-MT2-1.8B-Q4_K_M.gguf">
+        <div class="set-left"><h4>模型文件</h4><p>从 models 目录下拉选择 GGUF 模型；放入新模型后点「刷新」</p></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="cfgModel" class="set-input"></select>
+          <button class="btn ghost" id="btnRefreshModels" style="padding:6px 12px;font-size:12px">刷新</button>
+        </div>
       </div>
       <div class="set-row">
         <div class="set-left"><h4>省内存模式</h4><p>模型按需加载，内存占用更低，首次翻译变慢</p></div>
@@ -239,6 +250,10 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
         <div class="set-left"><h4>服务端口</h4><p>Web 管理界面 / API 监听端口，仅本机可访问</p></div>
         <input type="text" id="cfgPort" style="width:120px" inputmode="numeric">
       </div>
+      <div class="set-row">
+        <div class="set-left"><h4>上下文长度（n_ctx）</h4><p>长文本翻译需加大；越大内存占用越高，修改后重启生效</p></div>
+        <input type="text" id="cfgNctx" style="width:120px" inputmode="numeric">
+      </div>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
         <button class="btn ghost" id="btnReset">恢复默认</button>
         <button class="btn" id="btnSaveCfg">保存设置</button>
@@ -250,8 +265,12 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   <!-- 日志 -->
   <div class="pane" id="p-logs">
     <div class="card">
-      <h2>🗒️ 运行日志 <button class="btn ghost" id="btnRefreshLogs" style="padding:4px 12px;font-size:12px;margin-left:auto">刷新</button></h2>
+      <h2>🗒️ 应用日志 <button class="btn ghost" id="btnRefreshLogs" style="padding:4px 12px;font-size:12px;margin-left:auto">刷新</button></h2>
       <div class="logbox" id="logbox"></div>
+    </div>
+    <div class="card">
+      <h2>⚙️ 引擎日志（本地 llama-server）</h2>
+      <div class="logbox" id="enginelogbox"></div>
     </div>
   </div>
 </div>
@@ -297,9 +316,9 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
         });
         if (cur) sel.value = cur;
       };
-      fill($('#dstLang'), 'en');
-      fill($('#batchDst'), 'en');
-      fill($('#cfgTarget'), 'en');
+      fill($('#dstLang'), 'zh');
+      fill($('#batchDst'), 'zh');
+      fill($('#cfgTarget'), 'zh');
       const src = $('#srcLang');
       const cur = src.value;
       src.innerHTML = '<option value="">自动检测语言</option>';
@@ -358,21 +377,62 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     setBtnLoading($('#btnTranslate'), true, '翻 译');
     resultText.classList.add('loading');
     resultText.textContent = '';
+    $('#progWrap').style.display = '';
+    $('#progFill').style.width = '0%';
+    $('#progText').textContent = '准备中…';
+    const hideProg = () => { $('#progWrap').style.display = 'none'; };
+    let full = '';
+    let lastTps = 0;
     try{
-      const r = await fetch('/translate', {method:'POST', headers:{'Content-Type':'application/json'},
+      // 流式：逐段增量展示 + 进度条（百分比 / 预计剩余秒数 / token/s）
+      const resp = await fetch('/translate/stream', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({text, source: $('#srcLang').value, target: $('#dstLang').value})});
-      const d = await r.json();
-      if(d.ok){
-        resultText.textContent = d.text;
-        $('#autoHint').textContent = (d.source && $('#srcLang').value==='' ? '检测到 ' + langName(d.source) + ' · ' : '') +
-          (backend === 'openai' ? 'OpenAI 兼容 API' : '本地离线推理');
-      }else{
-        resultText.textContent = '错误：' + (d.error||'未知错误');
-        toast('翻译失败：' + (d.error||'未知错误'));
+      if(!resp.ok || !resp.body){
+        let d = {}; try{ d = await resp.json(); }catch(e){}
+        throw new Error(d.error || ('HTTP ' + resp.status));
       }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while(true){
+        const {done, value} = await reader.read();
+        if(done) break;
+        buf += decoder.decode(value, {stream:true});
+        let idx;
+        while((idx = buf.indexOf('\n\n')) >= 0){
+          const block = buf.slice(0, idx); buf = buf.slice(idx+2);
+          if(!block.startsWith('data: ')) continue;
+          let payload;
+          try{ payload = JSON.parse(block.slice(6)); }catch(e){ continue; }
+          if(payload.delta){ full += payload.delta; resultText.textContent = full; }
+          if(typeof payload.progress === 'number'){
+            const pct = Math.round(payload.progress * 100);
+            $('#progFill').style.width = pct + '%';
+            const stage = payload.stage || '';
+            const eta = payload.eta;
+            if(typeof payload.tps === 'number' && payload.tps > 0) lastTps = payload.tps;
+            let t = stage ? stage + ' · ' : '';
+            t += pct + '%';
+            if(typeof eta === 'number' && eta >= 0) t += ' · 预计剩余 ' + eta + 's';
+            if(lastTps > 0) t += ' · ' + lastTps.toFixed(1) + ' token/s';
+            $('#progText').textContent = t;
+          }
+          if(payload.error) throw new Error(payload.error);
+          if(payload.done){
+            $('#progFill').style.width = '100%';
+            $('#progText').textContent = '完成' + (lastTps > 0 ? ' · ' + lastTps.toFixed(1) + ' token/s' : '');
+            setTimeout(hideProg, 1200);
+            $('#autoHint').textContent = (payload.source && $('#srcLang').value==='' ? '检测到 ' + langName(payload.source) + ' · ' : '') +
+              (backend === 'openai' ? 'OpenAI 兼容 API' : '本地离线推理') +
+              (lastTps > 0 ? ' · ' + lastTps.toFixed(1) + ' token/s' : '');
+          }
+        }
+      }
+      if(!full) resultText.textContent = '（未生成内容）';
     }catch(e){
-      resultText.textContent = '请求失败：' + e.message;
-      toast('请求失败：' + e.message);
+      hideProg();
+      resultText.textContent = resultText.textContent || '错误：' + e.message;
+      toast('翻译失败：' + e.message);
     }finally{
       translating = false;
       resultText.classList.remove('loading');
@@ -464,31 +524,66 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   function syncOpenaiGroup(){
     $('#openaiGroup').style.display = $('#cfgBackend').value === 'openai' ? '' : 'none';
   }
+  // 模型下拉：列出 models 目录的 .gguf，保持当前选择；保留自定义路径项
+  async function loadModels(keep){
+    const d = await (await fetch('/models')).json();
+    const list = d.models || [];
+    const sel = $('#cfgModel');
+    sel.innerHTML = '';
+    const addOpt = (v, txt) => {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = txt;
+      sel.appendChild(o);
+    };
+    if(!list.length){
+      addOpt('', '（models 目录未发现模型）');
+    }else{
+      list.forEach(m => addOpt(m.path, m.name));
+    }
+    if(keep && ![...sel.options].some(o => o.value === keep)){
+      addOpt(keep, '（自定义）' + keep.split('/').pop());
+    }
+    if(keep) sel.value = keep;
+    return d;
+  }
+  $('#btnRefreshModels').onclick = async () => {
+    try{
+      const d = await loadModels($('#cfgModel').value);
+      toast('已刷新，共 ' + (d.models||[]).length + ' 个模型');
+    }catch(e){ toast('刷新模型失败：' + e.message); }
+  };
   async function loadConfig(){
     try{
       const d = await (await fetch('/config')).json();
-      $('#cfgTarget').value = d.target_lang || 'en';
+      const target = d.target_lang || 'zh';
+      $('#cfgTarget').value = target;
+      $('#dstLang').value = target;      // 翻译页默认目标语言跟随配置
+      $('#batchDst').value = target;     // 批量翻译默认目标语言跟随配置
       $('#cfgSaveMem').checked = !!d.save_memory;
       $('#cfgClipboard').checked = d.clipboard_enabled !== false;
       $('#cfgPort').value = d.api_port || 8848;
-      $('#cfgModel').value = d.model_path || '';
+      $('#cfgNctx').value = d.n_ctx || 8192;
       $('#cfgBackend').value = d.backend || 'local';
       $('#cfgOpenAIBase').value = d.openai_base_url || '';
       $('#cfgOpenAIKey').value = d.openai_key || '';
       $('#cfgOpenAIModel').value = d.openai_model || '';
       syncOpenaiGroup();
+      await loadModels(d.model_path);
     }catch(e){ toast('读取配置失败：' + e.message); }
   }
   function defaultConfig(){
-    $('#cfgTarget').value = 'en';
+    $('#cfgTarget').value = 'zh';
+    $('#dstLang').value = 'zh';
+    $('#batchDst').value = 'zh';
     $('#cfgSaveMem').checked = false;
     $('#cfgClipboard').checked = true;
     $('#cfgPort').value = 8848;
-    $('#cfgModel').value = 'models/Hy-MT2-1.8B-Q4_K_M.gguf';
+    $('#cfgNctx').value = 8192;
     $('#cfgBackend').value = 'local';
     $('#cfgOpenAIBase').value = 'https://api.openai.com/v1';
     $('#cfgOpenAIKey').value = '';
     $('#cfgOpenAIModel').value = 'gpt-4o-mini';
+    loadModels('models/Hy-MT2-1.8B-Q4_K_M.gguf');
     syncOpenaiGroup();
   }
   $('#cfgBackend').onchange = syncOpenaiGroup;
@@ -500,6 +595,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           save_memory: $('#cfgSaveMem').checked,
           clipboard_enabled: $('#cfgClipboard').checked,
           api_port: parseInt($('#cfgPort').value) || 8848,
+          n_ctx: parseInt($('#cfgNctx').value) || 8192,
           model_path: $('#cfgModel').value.trim(),
           backend: $('#cfgBackend').value,
           openai_base_url: $('#cfgOpenAIBase').value.trim(),
@@ -507,6 +603,9 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           openai_model: $('#cfgOpenAIModel').value.trim()
         })});
       if(!r.ok) throw new Error((await r.json()).error);
+      // 保存后立即同步翻译页默认语言
+      $('#dstLang').value = $('#cfgTarget').value;
+      $('#batchDst').value = $('#cfgTarget').value;
       toast('设置已保存' + ($('#cfgBackend').value !== backend ? '（重启后生效）' : ''));
     }catch(e){ toast('保存失败：' + e.message); }
   };
@@ -516,8 +615,10 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   async function loadLogs(){
     try{
       const d = await (await fetch('/logs')).json();
-      $('#logbox').textContent = (d.logs||[]).join('\n') || '（暂无日志）';
+      $('#logbox').textContent = (d.logs||[]).join('\n') || '（暂无应用日志）';
+      $('#enginelogbox').textContent = (d.engine||[]).join('\n') || '（暂无引擎日志，仅本地后端）';
       $('#logbox').scrollTop = $('#logbox').scrollHeight;
+      $('#enginelogbox').scrollTop = $('#enginelogbox').scrollHeight;
     }catch(e){ $('#logbox').textContent = '读取日志失败：' + e.message; }
   }
   $('#btnRefreshLogs').onclick = loadLogs;
@@ -528,6 +629,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     document.querySelectorAll('.pane').forEach(x=>x.classList.remove('active'));
     t.classList.add('active');
     document.getElementById(t.dataset.pane).classList.add('active');
+    if(t.dataset.pane === 'p-logs') loadLogs(); // 切到日志页自动加载
   });
 
   /* 定时健康检查 */

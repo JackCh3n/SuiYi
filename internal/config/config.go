@@ -15,6 +15,7 @@ type Config struct {
 	TargetLang       string `json:"target_lang"`        // 默认目标语言代码
 	SaveMemory       bool   `json:"save_memory"`        // 省内存模式（按需加载）
 	ClipboardEnabled bool   `json:"clipboard_enabled"`  // 剪贴板自动翻译开关
+	NCTX             int    `json:"n_ctx"`              // 推理上下文长度（长文本需加大）
 	Token            string `json:"token"`              // 可选鉴权 token（空=不鉴权）
 	Backend          string `json:"backend"`            // "local"（本地 llama）或 "openai"（OpenAI 兼容 API）
 	OpenAIBaseURL    string `json:"openai_base_url"`    // OpenAI 兼容 API 基地址（含 /v1）
@@ -30,9 +31,10 @@ func Defaults() *Config {
 		EnginePort:       8849,
 		ModelPath:        "models/Hy-MT2-1.8B-Q4_K_M.gguf",
 		EnginePath:       "third_party/windows/amd64/llama-server.exe",
-		TargetLang:       "en",
+		TargetLang:       "zh",
 		SaveMemory:       false,
 		ClipboardEnabled: true,
+		NCTX:             8192,
 		Backend:          "local",
 		OpenAIBaseURL:    "https://api.openai.com/v1",
 		OpenAIModel:      "gpt-4o-mini",
