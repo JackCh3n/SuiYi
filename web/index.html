@@ -141,11 +141,11 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     <div class="card translate-card">
       <div class="quick-tabs">
         <span class="qt-label">快捷：</span>
-        <button class="qt" data-src="zh" data-dst="en">中 → 英</button>
-        <button class="qt" data-src="en" data-dst="zh">英 → 中</button>
-        <button class="qt" data-src="ja" data-dst="zh">日 → 中</button>
-        <button class="qt" data-src="ko" data-dst="zh">韩 → 中</button>
-        <button class="qt" data-src="" data-dst="zh">自动 → 中</button>
+        <button class="qt" data-src="zh" data-dst="en">🇨🇳 → 🇬🇧 中英</button>
+        <button class="qt" data-src="en" data-dst="zh">🇬🇧 → 🇨🇳 英中</button>
+        <button class="qt" data-src="ja" data-dst="zh">🇯🇵 → 🇨🇳 日中</button>
+        <button class="qt" data-src="ko" data-dst="zh">🇰🇷 → 🇨🇳 韩中</button>
+        <button class="qt" data-src="" data-dst="zh">🔍 → 🇨🇳 自动</button>
       </div>
       <div class="langbar">
         <select id="srcLang" title="原文语言">
@@ -241,6 +241,10 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       <div class="set-row">
         <div class="set-left"><h4>剪贴板自动翻译</h4><p>复制即译（需系统托盘常驻及剪贴板模块）</p></div>
         <label class="switch"><input type="checkbox" id="cfgClipboard"><span class="sl"></span></label>
+      </div>
+      <div class="set-row">
+        <div class="set-left"><h4>开机自启</h4><p>随系统启动自动运行本服务（Windows 注册表）</p></div>
+        <label class="switch"><input type="checkbox" id="cfgAutostart"><span class="sl"></span></label>
       </div>
       <div class="set-row">
         <div class="set-left"><h4>服务端口</h4><p>Web 管理界面 / API 监听端口，仅本机可访问</p></div>
@@ -573,6 +577,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       $('#dstLang').value = target;      // 翻译页默认目标语言跟随配置
       $('#cfgSaveMem').checked = !!d.save_memory;
       $('#cfgClipboard').checked = d.clipboard_enabled !== false;
+      $('#cfgAutostart').checked = !!d.autostart;
       $('#cfgPort').value = d.api_port || 8848;
       $('#cfgNctx').value = d.n_ctx || 8192;
       $('#cfgBackend').value = d.backend || 'local';
@@ -588,6 +593,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     $('#dstLang').value = 'zh';
     $('#cfgSaveMem').checked = false;
     $('#cfgClipboard').checked = true;
+    $('#cfgAutostart').checked = false;
     $('#cfgPort').value = 8848;
     $('#cfgNctx').value = 8192;
     $('#cfgBackend').value = 'local';
@@ -605,6 +611,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           target_lang: $('#cfgTarget').value,
           save_memory: $('#cfgSaveMem').checked,
           clipboard_enabled: $('#cfgClipboard').checked,
+          autostart: $('#cfgAutostart').checked,
           api_port: parseInt($('#cfgPort').value) || 8848,
           n_ctx: parseInt($('#cfgNctx').value) || 8192,
           model_path: $('#cfgModel').value.trim(),
@@ -650,6 +657,26 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   /* 定时健康检查 */
   loadLangs().then(checkHealth).then(loadConfig);
   setInterval(checkHealth, 5000);
+
+  /* 剪贴板自动翻译结果提示：轮询 /clipboard，新记录弹 toast */
+  let lastClip = '';
+  async function pollClipboard(){
+    try{
+      const d = await (await fetch('/clipboard')).json();
+      const items = d.items || [];
+      if(!items.length) return;
+      const latest = items[items.length - 1];
+      const key = latest.time + '|' + (latest.result || latest.error || latest.text);
+      if(key === lastClip) return;
+      lastClip = key;
+      if(latest.result){
+        toast('📋 已复制翻译：' + latest.result.slice(0, 60));
+      }else if(latest.error){
+        toast('📋 剪贴板翻译失败：' + latest.error);
+      }
+    }catch(e){ /* 忽略轮询错误 */ }
+  }
+  setInterval(pollClipboard, 2000);
 })();
 </script>
 </body>

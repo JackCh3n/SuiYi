@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"suiyi/internal/api"
+	"suiyi/internal/autostart"
+	"suiyi/internal/clipboard"
 	"suiyi/internal/config"
 	"suiyi/internal/engine"
 	"suiyi/internal/queue"
@@ -111,12 +113,59 @@ func runServe(args []string) int {
 		}
 	}()
 
+	// 开机自启：按配置应用（Windows 注册表 Run 键）
+	if exe, err := os.Executable(); err == nil {
+		if cfg.Autostart {
+			if err := autostart.Enable(exe); err != nil {
+				srv.Log("设置开机自启失败: %v", err)
+			} else {
+				srv.Log("开机自启已启用")
+			}
+		} else {
+			_ = autostart.Disable()
+		}
+	}
+
+	// 剪贴板自动翻译：复制即译（去抖/过滤由 clipboard 包处理）
+	if cfg.ClipboardEnabled && !cfg.Headless {
+		clipCtx, clipCancel := context.WithCancel(context.Background())
+		defer clipCancel()
+		srv.Log("剪贴板自动翻译已启用（复制即译）")
+		go func() {
+			clipboard.Watch(clipCtx, func(text string) {
+				srv.Log("剪贴板捕获: %s", truncateRunes(text, 40))
+				done := q.Submit(&queue.Job{Type: "translate", Args: &api.TranslateRequest{Text: text, Target: cfg.TargetLang}})
+				item := api.ClipItem{Time: time.Now().Format("15:04:05"), Text: truncateRunes(text, 60)}
+				switch res := (<-done).(type) {
+				case *api.TranslateResult:
+					if res.Ok {
+						item.Result = res.Text
+					} else {
+						item.Error = res.Error
+					}
+				case error:
+					item.Error = res.Error()
+				}
+				srv.PushClipItem(item)
+			})
+		}()
+	}
+
 	// 等待退出信号
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	<-ch
 	fmt.Println("\n正在退出…")
 	return 0
+}
+
+// truncateRunes 按字符截断（避免截断多字节字符）
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }
 
 // runTranslate 走本地 API 单次翻译（要求服务已运行）

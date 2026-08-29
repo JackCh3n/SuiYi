@@ -29,6 +29,27 @@ type Server struct {
 	mu        sync.Mutex
 	logs      []string // 环形日志
 	logMax    int
+
+	clipMu      sync.Mutex
+	clipHistory []ClipItem // 剪贴板翻译历史（环形）
+}
+
+// ClipItem 剪贴板翻译记录
+type ClipItem struct {
+	Time   string `json:"time"`
+	Text   string `json:"text"`
+	Result string `json:"result,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+// PushClipItem 追加一条剪贴板翻译记录（保留最近 20 条）
+func (s *Server) PushClipItem(item ClipItem) {
+	s.clipMu.Lock()
+	defer s.clipMu.Unlock()
+	s.clipHistory = append(s.clipHistory, item)
+	if len(s.clipHistory) > 20 {
+		s.clipHistory = s.clipHistory[len(s.clipHistory)-20:]
+	}
 }
 
 // New 创建 API 服务
@@ -49,6 +70,9 @@ func (s *Server) addLog(format string, args ...any) {
 	s.mu.Unlock()
 }
 
+// Log 记录一条应用日志（供外部模块调用）
+func (s *Server) Log(format string, args ...any) { s.addLog(format, args...) }
+
 // Handler 返回路由
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -57,6 +81,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/translate/stream", s.handleTranslateStream)
 	mux.HandleFunc("/languages", s.handleLanguages)
 	mux.HandleFunc("/models", s.handleModels)
+	mux.HandleFunc("/clipboard", s.handleClipboard)
 	mux.HandleFunc("/config", s.handleConfig)
 	mux.HandleFunc("/logs", s.handleLogs)
 	mux.HandleFunc("/", s.handleWeb)
@@ -295,6 +320,14 @@ func (s *Server) handleLanguages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, Languages)
 }
 
+// handleClipboard 返回剪贴板自动翻译历史（供 Web 轮询提示）
+func (s *Server) handleClipboard(w http.ResponseWriter, r *http.Request) {
+	s.clipMu.Lock()
+	items := append([]ClipItem{}, s.clipHistory...)
+	s.clipMu.Unlock()
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+
 // handleModels 列出 models 目录下的 GGUF 模型文件（供 Web 下拉选择/刷新）
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"models": listModels()})
@@ -341,6 +374,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			TargetLang       *string `json:"target_lang"`
 			SaveMemory       *bool   `json:"save_memory"`
 			ClipboardEnabled *bool   `json:"clipboard_enabled"`
+			Autostart        *bool   `json:"autostart"`
 			NCTX             *int    `json:"n_ctx"`
 			Token            *string `json:"token"`
 			Backend          *string `json:"backend"`
@@ -374,6 +408,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.ClipboardEnabled != nil {
 			s.cfg.ClipboardEnabled = *patch.ClipboardEnabled
+		}
+		if patch.Autostart != nil {
+			s.cfg.Autostart = *patch.Autostart
 		}
 		if patch.NCTX != nil {
 			s.cfg.NCTX = *patch.NCTX
