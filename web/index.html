@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>随译 SuiYi · 本地翻译服务</title>
+<style>
+:root{
+  --bg:#f5f6fa; --card:#ffffff; --text:#1f2329; --sub:#646a73;
+  --border:#e5e6eb; --primary:#3370ff; --primary-hover:#2b5fd9;
+  --primary-bg:#e8f0ff; --ok:#00b42a; --err:#f53f3f; --warn:#ff7d00;
+  --hover:#f2f3f5; --radius:10px; --shadow:0 1px 4px rgba(31,35,41,.08);
+}
+[data-theme="dark"]{
+  --bg:#16181d; --card:#1f2329; --text:#e8e8e8; --sub:#9aa0a6;
+  --border:#2f343c; --primary:#4c8dff; --primary-hover:#70a5ff;
+  --primary-bg:#1f3557; --ok:#27c06a; --err:#f76560; --warn:#ff9440;
+  --hover:#262b33; --shadow:0 1px 4px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);transition:background .2s,color .2s}
+.header{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;background:var(--card);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10}
+.logo{display:flex;align-items:center;gap:10px}
+.logo .icon{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#3370ff,#00b42a);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px}
+.logo h1{font-size:17px;font-weight:600}
+.logo .sub{font-size:12px;color:var(--sub);margin-top:2px}
+.right{display:flex;align-items:center;gap:12px}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 10px;border-radius:20px;border:1px solid var(--border)}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--sub)}
+.pill.ok .dot{background:var(--ok)}
+.pill.err .dot{background:var(--err)}
+.pill.warm .dot{background:var(--warn)}
+.theme-btn{cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--text);padding:6px 12px;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:6px}
+.theme-btn:hover{background:var(--hover)}
+.wrap{max-width:960px;margin:0 auto;padding:20px 24px 60px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px}
+.tab{cursor:pointer;padding:10px 18px;font-size:14px;color:var(--sub);border-bottom:2px solid transparent}
+.tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:500}
+.pane{display:none}
+.pane.active{display:block}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px;box-shadow:var(--shadow)}
+.card h2{font-size:15px;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+label{font-size:13px;color:var(--sub)}
+select,input[type=text],textarea{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 12px;font-size:14px;font-family:inherit;outline:none}
+select:focus,input:focus,textarea:focus{border-color:var(--primary)}
+textarea{width:100%;min-height:120px;resize:vertical;line-height:1.6}
+.btn{cursor:pointer;border:none;background:var(--primary);color:#fff;padding:9px 22px;border-radius:8px;font-size:14px;font-weight:500;display:inline-flex;align-items:center;gap:8px}
+.btn:hover{background:var(--primary-hover)}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.btn.ghost{background:var(--primary-bg);color:var(--primary)}
+.out{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;min-height:80px;font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.meta{font-size:12px;color:var(--sub);margin-top:8px}
+.hint{font-size:12px;color:var(--sub);margin-bottom:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top;word-break:break-word}
+th{color:var(--sub);font-weight:400;background:var(--bg)}
+td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user-select:none}
+.ok-c{color:var(--ok)}.err-c{color:var(--err)}
+.logbox{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:Consolas,monospace;font-size:12px;line-height:1.8;max-height:420px;overflow:auto;white-space:pre-wrap;word-break:break-all}
+.set-row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);gap:16px}
+.set-row:last-child{border-bottom:none}
+.set-left h4{font-size:14px;margin-bottom:3px}
+.set-left p{font-size:12px;color:var(--sub)}
+.switch{position:relative;width:42px;height:24px;flex-shrink:0}
+.switch input{opacity:0;width:0;height:0}
+.switch .sl{border-radius:24px;position:absolute;inset:0;background:var(--border);transition:.2s;cursor:pointer}
+.switch .sl:before{content:"";position:absolute;width:18px;height:18px;border-radius:50%;left:3px;top:3px;background:#fff;transition:.2s}
+.switch input:checked + .sl{background:var(--primary)}
+.switch input:checked + .sl:before{transform:translateX(18px)}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:rot .7s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+.toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 20px;border-radius:8px;font-size:13px;opacity:0;transition:.25s;z-index:99;pointer-events:none}
+.toast.show{opacity:.95}
+.footer{text-align:center;color:var(--sub);font-size:12px;padding:20px}
+@media(max-width:640px){.wrap{padding:14px}.header{padding:12px 16px}.right .pill{display:none}}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="logo">
+    <div class="icon">译</div>
+    <div>
+      <h1>随译 SuiYi</h1>
+      <div class="sub">本地翻译服务 · llama.cpp</div>
+    </div>
+  </div>
+  <div class="right">
+    <span class="pill" id="enginePill"><span class="dot"></span><span id="engineText">引擎检查中</span></span>
+    <button class="theme-btn" id="themeBtn" title="切换亮色 / 暗色">🌙 暗色</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="tabs">
+    <div class="tab active" data-pane="p-translate">单句翻译</div>
+    <div class="tab" data-pane="p-batch">批量翻译</div>
+    <div class="tab" data-pane="p-config">设置</div>
+    <div class="tab" data-pane="p-logs">日志</div>
+  </nav>
+
+  <!-- 单句翻译 -->
+  <div class="pane active" id="p-translate">
+    <div class="card">
+      <h2>✍️ 翻译文本</h2>
+      <div class="row">
+        <div style="flex:1;min-width:220px">
+          <label>原文语言</label><br>
+          <select id="srcLang" style="width:100%;margin-top:6px">
+            <option value="">自动检测</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:220px">
+          <label>翻译为</label><br>
+          <select id="dstLang" style="width:100%;margin-top:6px"></select>
+        </div>
+      </div>
+      <textarea id="srcText" placeholder="输入需要翻译的文本…"></textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px">
+        <span class="hint" style="margin:0">支持中英日韩法等 33+ 语言互译，数据不出本机</span>
+        <button class="btn" id="btnTranslate">翻 译</button>
+      </div>
+    </div>
+    <div class="card" id="resultCard" style="display:none">
+      <h2>📄 翻译结果</h2>
+      <div class="out" id="resultText"></div>
+      <div class="meta" id="resultMeta"></div>
+    </div>
+  </div>
+
+  <!-- 批量翻译 -->
+  <div class="pane" id="p-batch">
+    <div class="card">
+      <h2>📚 批量翻译</h2>
+      <div class="row">
+        <div style="flex:1">
+          <label>翻译为</label><br>
+          <select id="batchDst" style="width:100%;margin-top:6px"></select>
+        </div>
+        <button class="btn" id="btnBatch">开始批量翻译</button>
+      </div>
+      <div class="hint">每行一条文本，按顺序串行处理。完成后结果在上方表格展示。</div>
+      <textarea id="batchText" placeholder="第一行文本&#10;第二行文本&#10;…"></textarea>
+    </div>
+    <div class="card" id="batchResultCard" style="display:none">
+      <h2>📋 批量结果 <span style="font-size:12px;color:var(--sub);font-weight:400" id="batchStat"></span></h2>
+      <table>
+        <thead><tr><th style="width:42%">原文</th><th style="width:42%">译文</th><th style="width:16%">状态</th></tr></thead>
+        <tbody id="batchTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 设置 -->
+  <div class="pane" id="p-config">
+    <div class="card">
+      <h2>⚙️ 常规设置</h2>
+      <div class="set-row">
+        <div class="set-left"><h4>默认目标语言</h4><p>新建翻译、剪贴板翻译使用的目标语言</p></div>
+        <select id="cfgTarget" style="width:200px"></select>
+      </div>
+      <div class="set-row">
+        <div class="set-left"><h4>省内存模式</h4><p>模型按需加载，内存占用更低，首次翻译变慢</p></div>
+        <label class="switch"><input type="checkbox" id="cfgSaveMem"><span class="sl"></span></label>
+      </div>
+      <div class="set-row">
+        <div class="set-left"><h4>剪贴板自动翻译</h4><p>复制即译（需系统托盘常驻及剪贴板模块）</p></div>
+        <label class="switch"><input type="checkbox" id="cfgClipboard"><span class="sl"></span></label>
+      </div>
+      <div class="set-row">
+        <div class="set-left"><h4>服务端口</h4><p>Web 管理界面 / API 监听端口，仅本机可访问</p></div>
+        <input type="text" id="cfgPort" style="width:120px" inputmode="numeric">
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
+        <button class="btn ghost" id="btnReset">恢复默认</button>
+        <button class="btn" id="btnSaveCfg">保存设置</button>
+      </div>
+      <div class="hint" style="margin-top:10px">修改端口后需重启服务生效；模型路径变更请编辑 data/config.json。</div>
+    </div>
+  </div>
+
+  <!-- 日志 -->
+  <div class="pane" id="p-logs">
+    <div class="card">
+      <h2>🗒️ 运行日志 <button class="btn ghost" id="btnRefreshLogs" style="padding:4px 12px;font-size:12px;margin-left:auto">刷新</button></h2>
+      <div class="logbox" id="logbox"></div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">随译 SuiYi · 腾讯 Hy-MT2-1.8B · 全程本地离线推理</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  const $ = s => document.querySelector(s);
+  let langs = [];
+  const toast = msg => { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); };
+
+  /* 主题切换：默认亮色，localStorage 记忆 */
+  const themeBtn = $('#themeBtn');
+  const saved = localStorage.getItem('suiyi-theme');
+  if (saved) document.documentElement.dataset.theme = saved;
+  const refreshThemeBtn = () => {
+    const dark = document.documentElement.dataset.theme === 'dark';
+    themeBtn.textContent = dark ? '☀️ 亮色' : '🌙 暗色';
+  };
+  themeBtn.onclick = () => {
+    const dark = document.documentElement.dataset.theme !== 'dark';
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    localStorage.setItem('suiyi-theme', dark ? 'dark' : 'light');
+    refreshThemeBtn();
+  };
+  refreshThemeBtn();
+
+  /* 语言列表 */
+  async function loadLangs(){
+    try{
+      const r = await fetch('/languages'); langs = await r.json();
+      const fill = (sel, keepCode) => {
+        const cur = keepCode;
+        sel.innerHTML = '';
+        langs.forEach(l => {
+          const o = document.createElement('option');
+          o.value = l.code; o.textContent = l.zh + ' (' + l.en + ')';
+          sel.appendChild(o);
+        });
+        if (cur) sel.value = cur;
+      };
+      fill($('#dstLang'), 'en');
+      fill($('#batchDst'), 'en');
+      fill($('#cfgTarget'), 'en');
+      const src = $('#srcLang');
+      const cur = src.value;
+      src.innerHTML = '<option value="">自动检测</option>';
+      langs.forEach(l => {
+        const o = document.createElement('option');
+        o.value = l.code; o.textContent = l.zh;
+        src.appendChild(o);
+      });
+      src.value = cur || '';
+    }catch(e){ toast('加载语言列表失败：' + e.message); }
+  }
+
+  /* 健康检查 */
+  let healthy = false;
+  async function checkHealth(){
+    try{
+      const r = await fetch('/health');
+      const d = await r.json();
+      healthy = !!d.engine;
+      const pill = $('#enginePill'), txt = $('#engineText');
+      pill.className = 'pill ' + (d.engine ? 'ok' : 'warm');
+      txt.textContent = d.engine ? '引擎就绪' : '引擎加载中…';
+      if (d.pending > 0) txt.textContent = '翻译队列 ' + d.pending + ' 条';
+    }catch(e){
+      healthy = false;
+      $('#enginePill').className = 'pill err'; $('#engineText').textContent = '服务离线';
+    }
+  }
+
+  /* 单句翻译 */
+  function setBtnLoading(btn, loading, label){
+    btn.disabled = loading;
+    btn.innerHTML = loading ? '<span class="spin"></span>' + (label||'翻译中…') : label;
+  }
+  $('#btnTranslate').onclick = async () => {
+    const text = $('#srcText').value.trim();
+    if(!text){ toast('请输入文本'); return; }
+    const btn = $('#btnTranslate');
+    setBtnLoading(btn, true, '翻 译');
+    $('#resultCard').style.display = 'none';
+    try{
+      const r = await fetch('/translate', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({text, source: $('#srcLang').value, target: $('#dstLang').value})});
+      const d = await r.json();
+      if(d.ok){
+        $('#resultText').textContent = d.text;
+        $('#resultMeta').textContent = (d.source?('源语言 ' + d.source + ' · '):'') + '目标 ' + d.target + ' · ' + new Date().toLocaleTimeString();
+        $('#resultCard').style.display = '';
+      }else{
+        toast('翻译失败：' + (d.error||'未知错误'));
+        $('#resultText').textContent = '错误：' + (d.error||'');
+        $('#resultCard').style.display = '';
+      }
+    }catch(e){ toast('请求失败：' + e.message); }
+    finally{ setBtnLoading(btn, false, '翻 译'); }
+  };
+
+  /* 批量翻译 */
+  $('#btnBatch').onclick = async () => {
+    const lines = $('#batchText').value.split('\n').map(s=>s.trim()).filter(Boolean);
+    if(!lines.length){ toast('请输入要翻译的文本'); return; }
+    const btn = $('#btnBatch');
+    setBtnLoading(btn, true, '翻译中…');
+    const tb = $('#batchTbody'); tb.innerHTML = '';
+    $('#batchResultCard').style.display = '';
+    lines.forEach((ln,i)=>{
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td></td><td class="err-c">等待中…</td><td>排队</td>';
+      tb.appendChild(tr);
+    });
+    try{
+      const r = await fetch('/batch', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({items: lines.map(t=>({text:t})), target: $('#batchDst').value})});
+      const d = await r.json();
+      const rows = tb.children;
+      let failed = 0;
+      d.items.forEach((it,i)=>{
+        const tr = rows[i];
+        tr.cells[0].textContent = lines[i];
+        if(it.ok){
+          tr.cells[1].innerHTML = it.text + '<span class="copy" data-t="'+encodeURIComponent(it.text)+'">复制</span>';
+          tr.cells[2].className = 'ok-c'; tr.cells[2].textContent = '成功';
+        }else{
+          tr.cells[1].textContent = it.error || '失败';
+          tr.cells[2].className = 'err-c'; tr.cells[2].textContent = '失败'; failed++;
+        }
+      });
+      $('#batchStat').textContent = '· 成功 ' + (d.items.length - failed) + ' / ' + d.items.length;
+      if(d.items.every(x=>x.ok)) toast('批量翻译完成');
+    }catch(e){ toast('批量请求失败：' + e.message); }
+    finally{ setBtnLoading(btn, false, '开始批量翻译'); }
+  };
+  $('#batchTbody').addEventListener('click', e => {
+    if(e.target.classList.contains('copy')){
+      navigator.clipboard.writeText(decodeURIComponent(e.target.dataset.t)).then(()=>toast('已复制译文'));
+    }
+  });
+
+  /* 设置 */
+  async function loadConfig(){
+    try{
+      const d = await (await fetch('/config')).json();
+      $('#cfgTarget').value = d.target_lang || 'en';
+      $('#cfgSaveMem').checked = !!d.save_memory;
+      $('#cfgClipboard').checked = d.clipboard_enabled !== false;
+      $('#cfgPort').value = d.api_port || 8848;
+    }catch(e){ toast('读取配置失败：' + e.message); }
+  }
+  function defaultConfig(){
+    $('#cfgTarget').value = 'en';
+    $('#cfgSaveMem').checked = false;
+    $('#cfgClipboard').checked = true;
+    $('#cfgPort').value = 8848;
+  }
+  $('#btnSaveCfg').onclick = async () => {
+    try{
+      const r = await fetch('/config', {method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          target_lang: $('#cfgTarget').value,
+          save_memory: $('#cfgSaveMem').checked,
+          clipboard_enabled: $('#cfgClipboard').checked,
+          api_port: parseInt($('#cfgPort').value) || 8848
+        })});
+      if(!r.ok) throw new Error((await r.json()).error);
+      toast('设置已保存');
+    }catch(e){ toast('保存失败：' + e.message); }
+  };
+  $('#btnReset').onclick = defaultConfig;
+
+  /* 日志 */
+  async function loadLogs(){
+    try{
+      const d = await (await fetch('/logs')).json();
+      $('#logbox').textContent = (d.logs||[]).join('\n') || '（暂无日志）';
+      $('#logbox').scrollTop = $('#logbox').scrollHeight;
+    }catch(e){ $('#logbox').textContent = '读取日志失败：' + e.message; }
+  }
+  $('#btnRefreshLogs').onclick = loadLogs;
+
+  /* Tab */
+  document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.pane').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById(t.dataset.pane).classList.add('active');
+  });
+
+  /* 定时健康检查 */
+  loadLangs().then(checkHealth).then(loadConfig);
+  setInterval(checkHealth, 5000);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# 第三方二进制（按平台目录分发，不入库）
+third_party/
+
+# 模型文件（约 0.56GB+，不入库）
+models/
+
+# 构建产物
+build/dist/
+*.exe
+*.zip
+
+# 运行数据
+data/
+*.log
+.idea/
+.vscode/
