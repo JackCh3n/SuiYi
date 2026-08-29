@@ -19,17 +19,19 @@ import (
 
 // Server HTTP 服务
 type Server struct {
-	cfg    *config.Config
-	eng    *engine.Engine
-	q      *queue.Queue
-	mu     sync.Mutex
-	logs   []string // 环形日志
-	logMax int
+	cfg       *config.Config
+	completer engine.Completer // 当前推理后端
+	eng       *engine.Engine   // 本地 llama 引擎（仅 local 后端非空）
+	q         *queue.Queue
+	mu        sync.Mutex
+	logs      []string // 环形日志
+	logMax    int
 }
 
 // New 创建 API 服务
-func New(cfg *config.Config, eng *engine.Engine, q *queue.Queue) *Server {
-	return &Server{cfg: cfg, eng: eng, q: q, logMax: 500}
+func New(cfg *config.Config, completer engine.Completer, q *queue.Queue) *Server {
+	eng, _ := completer.(*engine.Engine)
+	return &Server{cfg: cfg, completer: completer, eng: eng, q: q, logMax: 500}
 }
 
 // addLog 记一条日志（供 /logs 与控制台）
@@ -82,18 +84,27 @@ func readJSON(r *http.Request, v any) error {
 // ---- 各接口 ----
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	engineOK := false
-	select {
-	case <-s.eng.Ready():
-		engineOK = true
-	default:
-		engineOK = s.eng.Healthy()
-	}
-	writeJSON(w, 200, map[string]any{
+	resp := map[string]any{
 		"status":  "ok",
-		"engine":  engineOK,
+		"backend": s.cfg.Backend,
 		"pending": s.q.Pending(),
-	})
+	}
+	if s.cfg.Backend == "openai" {
+		// OpenAI 兼容后端：有配置即视为可用
+		resp["engine"] = s.cfg.OpenAIBaseURL != ""
+	} else {
+		engineOK := false
+		if s.eng != nil {
+			select {
+			case <-s.eng.Ready():
+				engineOK = true
+			default:
+				engineOK = s.eng.Healthy()
+			}
+		}
+		resp["engine"] = engineOK
+	}
+	writeJSON(w, 200, resp)
 }
 
 // TranslateRequest 单句翻译请求
@@ -226,6 +237,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			SaveMemory       *bool   `json:"save_memory"`
 			ClipboardEnabled *bool   `json:"clipboard_enabled"`
 			Token            *string `json:"token"`
+			Backend          *string `json:"backend"`
+			OpenAIBaseURL    *string `json:"openai_base_url"`
+			OpenAIKey        *string `json:"openai_key"`
+			OpenAIModel      *string `json:"openai_model"`
 		}
 		if err := readJSON(r, &patch); err != nil {
 			writeJSON(w, 400, map[string]string{"error": err.Error()})
@@ -254,6 +269,18 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.Token != nil {
 			s.cfg.Token = *patch.Token
+		}
+		if patch.Backend != nil {
+			s.cfg.Backend = *patch.Backend
+		}
+		if patch.OpenAIBaseURL != nil {
+			s.cfg.OpenAIBaseURL = *patch.OpenAIBaseURL
+		}
+		if patch.OpenAIKey != nil {
+			s.cfg.OpenAIKey = *patch.OpenAIKey
+		}
+		if patch.OpenAIModel != nil {
+			s.cfg.OpenAIModel = *patch.OpenAIModel
 		}
 		if err := s.cfg.Save(); err != nil {
 			writeJSON(w, 500, map[string]string{"error": "保存配置失败: " + err.Error()})

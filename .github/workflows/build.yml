@@ -1,0 +1,207 @@
+name: Build Release
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows
+          - os: windows-latest
+            target: windows-amd64
+            goos: windows
+            goarch: amd64
+            ext: .exe
+          - os: windows-latest
+            target: windows-arm64
+            goos: windows
+            goarch: arm64
+            ext: .exe
+          - os: windows-latest
+            target: windows-386
+            goos: windows
+            goarch: "386"
+            ext: .exe
+
+          # Linux x86/x64
+          - os: ubuntu-latest
+            target: linux-amd64
+            goos: linux
+            goarch: amd64
+            ext: ""
+          - os: ubuntu-latest
+            target: linux-386
+            goos: linux
+            goarch: "386"
+            ext: ""
+
+          # Linux ARM
+          - os: ubuntu-latest
+            target: linux-arm64
+            goos: linux
+            goarch: arm64
+            ext: ""
+          - os: ubuntu-latest
+            target: linux-arm
+            goos: linux
+            goarch: arm
+            goarm: "7"
+            ext: ""
+
+          # Linux LoongArch64 (龙芯3A6000+)
+          - os: ubuntu-latest
+            target: linux-loong64
+            goos: linux
+            goarch: loong64
+            ext: ""
+
+          # Linux RISC-V 64 (香山/玄铁等开源架构)
+          - os: ubuntu-latest
+            target: linux-riscv64
+            goos: linux
+            goarch: riscv64
+            ext: ""
+
+          # macOS
+          - os: macos-latest
+            target: darwin-amd64
+            goos: darwin
+            goarch: amd64
+            ext: ""
+          - os: macos-latest
+            target: darwin-arm64
+            goos: darwin
+            goarch: arm64
+            ext: ""
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          check-latest: true
+
+      - name: Get build timestamp
+        id: timestamp
+        shell: bash
+        run: |
+          TIMESTAMP=$(date +"%Y_%m%d")
+          echo "value=v${TIMESTAMP}" >> $GITHUB_OUTPUT
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm || '' }}
+          CGO_ENABLED: 0
+        shell: bash
+        run: |
+          OUTPUT="suiyi-${{ matrix.target }}${{ matrix.ext }}"
+          go build -trimpath -ldflags "-s -w -X main.version=${{ steps.timestamp.outputs.value }}" -o "$OUTPUT" .
+          echo "Built: $OUTPUT"
+          ls -lh "$OUTPUT" || dir "$OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: suiyi-${{ matrix.target }}
+          path: suiyi-${{ matrix.target }}${{ matrix.ext }}
+          retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get build timestamp
+        id: timestamp
+        run: |
+          TIMESTAMP=$(date +"%Y_%m%d")
+          echo "value=v${TIMESTAMP}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          pattern: suiyi-*
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          # 二进制较小，不做 zip/tar.gz 打包，直接上传原始二进制
+          mkdir -p release
+          for dir in artifacts/suiyi-*/; do
+            for f in "$dir"*; do
+              [ -f "$f" ] && cp "$f" release/
+            done
+          done
+          echo "=== Release assets ==="
+          ls -lh release/
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.timestamp.outputs.value }}
+          name: ${{ steps.timestamp.outputs.value }}
+          files: release/*
+          # 版本号只到日 v{YYYY_MMDD}：同一天多次 push 时更新同一 Release，
+          # 避免同名 tag 已存在导致创建失败（与 CNB git:release 行为对齐）。
+          allow_update: true
+          body: |
+            ## 随译 SuiYi ${{ steps.timestamp.outputs.value }}
+
+            本地离线 / OpenAI 兼容多后端翻译服务（Go + llama.cpp）。
+
+            ### 支持平台
+
+            | 平台 | 架构 | 文件 |
+            |------|------|------|
+            | Windows | x86_64 (amd64) | suiyi-windows-amd64.exe |
+            | Windows | ARM64 | suiyi-windows-arm64.exe |
+            | Windows | x86 (386) | suiyi-windows-386.exe |
+            | Linux | x86_64 (amd64) | suiyi-linux-amd64 |
+            | Linux | x86 (386) | suiyi-linux-386 |
+            | Linux | ARM64 | suiyi-linux-arm64 |
+            | Linux | ARMv7 | suiyi-linux-arm |
+            | Linux | LoongArch64 (龙芯) | suiyi-linux-loong64 |
+            | Linux | RISC-V 64 | suiyi-linux-riscv64 |
+            | macOS | x86_64 (Intel) | suiyi-darwin-amd64 |
+            | macOS | ARM64 (Apple Silicon) | suiyi-darwin-arm64 |
+
+            ### 快速使用
+
+            > 运行时还需要对应平台的 llama-server（llama.cpp）与 GGUF 模型，
+            > 见设计文档 §5 平台能力矩阵与 third_party/ 目录说明。
+
+            ```bash
+            # Windows（先放入 llama-server.exe 与模型）
+            suiyi-windows-amd64.exe serve
+            # 打开 http://127.0.0.1:8848
+
+            # Linux/macOS（先赋予执行权限）
+            chmod +x suiyi-linux-amd64
+            ./suiyi-linux-amd64 serve
+            ```
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

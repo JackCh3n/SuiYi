@@ -16,6 +16,10 @@ type Config struct {
 	SaveMemory       bool   `json:"save_memory"`        // 省内存模式（按需加载）
 	ClipboardEnabled bool   `json:"clipboard_enabled"`  // 剪贴板自动翻译开关
 	Token            string `json:"token"`              // 可选鉴权 token（空=不鉴权）
+	Backend          string `json:"backend"`            // "local"（本地 llama）或 "openai"（OpenAI 兼容 API）
+	OpenAIBaseURL    string `json:"openai_base_url"`    // OpenAI 兼容 API 基地址（含 /v1）
+	OpenAIKey        string `json:"openai_key"`         // OpenAI 兼容 API Key
+	OpenAIModel      string `json:"openai_model"`       // OpenAI 兼容 API 模型名
 	Headless         bool   `json:"-"`                  // 无托盘模式（运行时决定，不持久化）
 }
 
@@ -24,11 +28,14 @@ func Defaults() *Config {
 	return &Config{
 		APIPort:          8848,
 		EnginePort:       8849,
-		ModelPath:        "models/Hy-MT2-1.8B-2bit-v2.gguf",
+		ModelPath:        "models/Hy-MT2-1.8B-Q4_K_M.gguf",
 		EnginePath:       "third_party/windows/amd64/llama-server.exe",
 		TargetLang:       "en",
 		SaveMemory:       false,
 		ClipboardEnabled: true,
+		Backend:          "local",
+		OpenAIBaseURL:    "https://api.openai.com/v1",
+		OpenAIModel:      "gpt-4o-mini",
 	}
 }
 

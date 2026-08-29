@@ -65,9 +65,9 @@ def main(path):
             ttype = struct.unpack("<I", f.read(4))[0]
             offset = struct.unpack("<Q", f.read(8))[0]
             types[ttype] += 1
-            if ttype not in GGML_TYPE_NAMES or i < 3:
-                print("  [%d] type %d = %-10s %s dims=%s" % (
-                    i, ttype, GGML_TYPE_NAMES.get(ttype, "???"), name, dims))
+            if i < 6:
+                print("  [%d] type %d = %-10s %s dims=%s off=%d" % (
+                    i, ttype, GGML_TYPE_NAMES.get(ttype, "???"), name, dims, offset))
         print("---- 汇总 ----")
         for ttype, cnt in types.most_common():
             print("  type %2d = %-10s x %d" % (ttype, GGML_TYPE_NAMES.get(ttype, "???"), cnt))

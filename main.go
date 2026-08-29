@@ -24,6 +24,9 @@ import (
 	"suiyi/internal/queue"
 )
 
+// version 构建版本号，由 CI 通过 -ldflags "-X main.version=..." 注入
+var version = "dev"
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "translate" {
 		os.Exit(runTranslate(os.Args[2:]))
@@ -49,27 +52,35 @@ func runServe(args []string) int {
 	}
 	cfg.Headless = *headless
 
-	fmt.Printf("随译 SuiYi · 模型 %s\n", config.Resolve(cfg.ModelPath))
+	fmt.Printf("随译 SuiYi v%s · 推理后端 %s · 模型 %s\n", version, cfg.Backend, config.Resolve(cfg.ModelPath))
 
-	eng := engine.New(&engine.Config{
-		EnginePort: cfg.EnginePort,
-		ModelPath:  cfg.ModelPath,
-		EnginePath: cfg.EnginePath,
-		SaveMemory: cfg.SaveMemory,
-		NGL:        *ngl,
-	})
-	if err := eng.Start(context.Background()); err != nil {
-		fmt.Fprintln(os.Stderr, "启动推理引擎失败:", err)
-		return 1
+	// 按后端组装推理调用方：本地 llama.cpp 或 OpenAI 兼容 API
+	var completer engine.Completer
+	if cfg.Backend == "openai" {
+		completer = engine.NewOpenAI(cfg.OpenAIBaseURL, cfg.OpenAIKey, cfg.OpenAIModel)
+	} else {
+		eng := engine.New(&engine.Config{
+			EnginePort: cfg.EnginePort,
+			ModelPath:  cfg.ModelPath,
+			EnginePath: cfg.EnginePath,
+			SaveMemory: cfg.SaveMemory,
+			NGL:        *ngl,
+		})
+		if err := eng.Start(context.Background()); err != nil {
+			fmt.Fprintln(os.Stderr, "启动推理引擎失败:", err)
+			return 1
+		}
+		completer = eng
+		defer eng.Stop()
 	}
 
-	// 翻译队列 worker：串行调用引擎
+	// 翻译队列 worker：串行调用后端
 	q := queue.New(func(ctx context.Context, job *queue.Job) {
 		switch job.Type {
 		case "translate":
 			req := job.Args.(*api.TranslateRequest)
 			prompt := api.BuildPrompt(req.Text, req.Source, req.Target, req.TermGlossary, req.Style)
-			out, err := eng.Complete(ctx, engine.ChatRequest{
+			out, err := completer.Complete(ctx, engine.ChatRequest{
 				Model: "suiyi",
 				Messages: []engine.Msg{
 					{Role: "user", Content: prompt},
@@ -90,7 +101,7 @@ func runServe(args []string) int {
 	})
 	defer q.Close()
 
-	srv := api.New(cfg, eng, q)
+	srv := api.New(cfg, completer, q)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintln(os.Stderr, "HTTP 服务错误:", err)
@@ -102,7 +113,6 @@ func runServe(args []string) int {
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	<-ch
 	fmt.Println("\n正在退出…")
-	_ = eng.Stop()
 	return 0
 }
 

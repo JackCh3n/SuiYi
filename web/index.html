@@ -32,7 +32,7 @@ body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;backgroun
 .pill.warm .dot{background:var(--warn)}
 .theme-btn{cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--text);padding:6px 12px;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:6px}
 .theme-btn:hover{background:var(--hover)}
-.wrap{max-width:960px;margin:0 auto;padding:20px 24px 60px}
+.wrap{max-width:1100px;margin:0 auto;padding:20px 24px 60px}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px}
 .tab{cursor:pointer;padding:10px 18px;font-size:14px;color:var(--sub);border-bottom:2px solid transparent}
 .tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:500}
@@ -42,14 +42,14 @@ body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;backgroun
 .card h2{font-size:15px;margin-bottom:14px;display:flex;align-items:center;gap:8px}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
 label{font-size:13px;color:var(--sub)}
-select,input[type=text],textarea{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 12px;font-size:14px;font-family:inherit;outline:none}
+select,input[type=text],input[type=password],textarea{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 12px;font-size:14px;font-family:inherit;outline:none}
 select:focus,input:focus,textarea:focus{border-color:var(--primary)}
 textarea{width:100%;min-height:120px;resize:vertical;line-height:1.6}
 .btn{cursor:pointer;border:none;background:var(--primary);color:#fff;padding:9px 22px;border-radius:8px;font-size:14px;font-weight:500;display:inline-flex;align-items:center;gap:8px}
 .btn:hover{background:var(--primary-hover)}
 .btn:disabled{opacity:.55;cursor:not-allowed}
 .btn.ghost{background:var(--primary-bg);color:var(--primary)}
-.out{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;min-height:80px;font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.out{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;min-height:120px;font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
 .meta{font-size:12px;color:var(--sub);margin-top:8px}
 .hint{font-size:12px;color:var(--sub);margin-bottom:8px}
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -62,6 +62,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
 .set-row:last-child{border-bottom:none}
 .set-left h4{font-size:14px;margin-bottom:3px}
 .set-left p{font-size:12px;color:var(--sub)}
+.set-input{width:340px;max-width:60vw}
 .switch{position:relative;width:42px;height:24px;flex-shrink:0}
 .switch input{opacity:0;width:0;height:0}
 .switch .sl{border-radius:24px;position:absolute;inset:0;background:var(--border);transition:.2s;cursor:pointer}
@@ -73,6 +74,30 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
 .toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 20px;border-radius:8px;font-size:13px;opacity:0;transition:.25s;z-index:99;pointer-events:none}
 .toast.show{opacity:.95}
 .footer{text-align:center;color:var(--sub);font-size:12px;padding:20px}
+
+/* ---- Google 式左右对照翻译 ---- */
+.translate-card{padding:16px}
+.langbar{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.langbar select{flex:1;min-width:0;font-size:14px}
+.langbar .auto-opt{color:var(--sub)}
+.swap-btn{cursor:pointer;flex-shrink:0;width:40px;height:40px;border:1px solid var(--border);background:var(--card);color:var(--primary);border-radius:50%;font-size:18px;line-height:1}
+.swap-btn:hover{background:var(--primary-bg)}
+.panes{display:flex;gap:14px;align-items:stretch}
+.pane-box{flex:1;min-width:0;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.pane-head{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg);border-bottom:1px solid var(--border)}
+.pane-title{font-size:13px;color:var(--sub);font-weight:500}
+.pane-tools{display:flex;gap:6px}
+.icon-btn{cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--sub);padding:3px 10px;border-radius:6px;font-size:12px}
+.icon-btn:hover{color:var(--primary);border-color:var(--primary)}
+.pane-box textarea{border:none;border-radius:0;min-height:260px;height:100%;flex:1;padding:14px;font-size:15px;line-height:1.7;resize:none}
+.pane-box textarea:focus{border:none}
+.pane-box .out{border:none;border-radius:0;flex:1;min-height:260px;font-size:15px;background:var(--card)}
+.pane-box .out.loading::after{content:"…";display:inline-block;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.translate-foot{display:flex;align-items:center;justify-content:space-between;margin-top:14px;gap:10px}
+.translate-foot .hint{margin:0}
+.auto-toggle{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);cursor:pointer}
+@media(max-width:760px){.panes{flex-direction:column}.pane-box textarea,.pane-box .out{min-height:160px}}
 @media(max-width:640px){.wrap{padding:14px}.header{padding:12px 16px}.right .pill{display:none}}
 </style>
 </head>
@@ -94,38 +119,52 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
 
 <div class="wrap">
   <nav class="tabs">
-    <div class="tab active" data-pane="p-translate">单句翻译</div>
+    <div class="tab active" data-pane="p-translate">翻译</div>
     <div class="tab" data-pane="p-batch">批量翻译</div>
     <div class="tab" data-pane="p-config">设置</div>
     <div class="tab" data-pane="p-logs">日志</div>
   </nav>
 
-  <!-- 单句翻译 -->
+  <!-- 翻译（Google 式左右对照） -->
   <div class="pane active" id="p-translate">
-    <div class="card">
-      <h2>✍️ 翻译文本</h2>
-      <div class="row">
-        <div style="flex:1;min-width:220px">
-          <label>原文语言</label><br>
-          <select id="srcLang" style="width:100%;margin-top:6px">
-            <option value="">自动检测</option>
-          </select>
+    <div class="card translate-card">
+      <div class="langbar">
+        <select id="srcLang" title="原文语言">
+          <option value="">自动检测语言</option>
+        </select>
+        <button class="swap-btn" id="swapBtn" title="交换语言">⇄</button>
+        <select id="dstLang" title="目标语言"></select>
+      </div>
+      <div class="panes">
+        <div class="pane-box">
+          <div class="pane-head">
+            <span class="pane-title">原文</span>
+            <span class="pane-tools">
+              <button class="icon-btn" id="clearBtn" title="清空原文">清空</button>
+              <button class="icon-btn" id="pasteBtn" title="粘贴剪贴板">粘贴</button>
+            </span>
+          </div>
+          <textarea id="srcText" placeholder="输入文本，或点击粘贴…"></textarea>
         </div>
-        <div style="flex:1;min-width:220px">
-          <label>翻译为</label><br>
-          <select id="dstLang" style="width:100%;margin-top:6px"></select>
+        <div class="pane-box">
+          <div class="pane-head">
+            <span class="pane-title">译文</span>
+            <span class="pane-tools">
+              <button class="icon-btn" id="copyBtn" title="复制译文">复制</button>
+            </span>
+          </div>
+          <div class="out" id="resultText">译文将显示在这里</div>
         </div>
       </div>
-      <textarea id="srcText" placeholder="输入需要翻译的文本…"></textarea>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px">
-        <span class="hint" style="margin:0">支持中英日韩法等 33+ 语言互译，数据不出本机</span>
+      <div class="translate-foot">
+        <label class="auto-toggle">
+          <input type="checkbox" id="autoTranslate" checked>
+          <span>输入自动翻译</span>
+        </label>
+        <span class="hint" id="autoHint"></span>
+        <span class="hint" id="charCount"></span>
         <button class="btn" id="btnTranslate">翻 译</button>
       </div>
-    </div>
-    <div class="card" id="resultCard" style="display:none">
-      <h2>📄 翻译结果</h2>
-      <div class="out" id="resultText"></div>
-      <div class="meta" id="resultMeta"></div>
     </div>
   </div>
 
@@ -155,10 +194,38 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   <!-- 设置 -->
   <div class="pane" id="p-config">
     <div class="card">
+      <h2>⚙️ 推理后端</h2>
+      <div class="set-row">
+        <div class="set-left"><h4>推理后端</h4><p>本地 llama.cpp 完全离线；OpenAI 兼容 API 可对接任意服务</p></div>
+        <select id="cfgBackend" style="width:200px">
+          <option value="local">本地 llama.cpp</option>
+          <option value="openai">OpenAI 兼容 API</option>
+        </select>
+      </div>
+      <div id="openaiGroup">
+        <div class="set-row">
+          <div class="set-left"><h4>API 基地址</h4><p>OpenAI 兼容接口地址（含 /v1），如 https://api.openai.com/v1</p></div>
+          <input type="text" class="set-input" id="cfgOpenAIBase" placeholder="https://api.openai.com/v1">
+        </div>
+        <div class="set-row">
+          <div class="set-left"><h4>API Key</h4><p>密钥，仅保存在本机 data/config.json</p></div>
+          <input type="password" class="set-input" id="cfgOpenAIKey" placeholder="sk-…">
+        </div>
+        <div class="set-row">
+          <div class="set-left"><h4>模型名</h4><p>使用的模型标识，如 gpt-4o-mini、qwen-plus、deepseek-chat</p></div>
+          <input type="text" class="set-input" id="cfgOpenAIModel" placeholder="gpt-4o-mini">
+        </div>
+      </div>
+    </div>
+    <div class="card">
       <h2>⚙️ 常规设置</h2>
       <div class="set-row">
         <div class="set-left"><h4>默认目标语言</h4><p>新建翻译、剪贴板翻译使用的目标语言</p></div>
         <select id="cfgTarget" style="width:200px"></select>
+      </div>
+      <div class="set-row">
+        <div class="set-left"><h4>模型文件路径</h4><p>本地后端使用的 GGUF 模型（相对可执行文件目录）</p></div>
+        <input type="text" class="set-input" id="cfgModel" placeholder="models/Hy-MT2-1.8B-Q4_K_M.gguf">
       </div>
       <div class="set-row">
         <div class="set-left"><h4>省内存模式</h4><p>模型按需加载，内存占用更低，首次翻译变慢</p></div>
@@ -176,7 +243,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
         <button class="btn ghost" id="btnReset">恢复默认</button>
         <button class="btn" id="btnSaveCfg">保存设置</button>
       </div>
-      <div class="hint" style="margin-top:10px">修改端口后需重启服务生效；模型路径变更请编辑 data/config.json。</div>
+      <div class="hint" style="margin-top:10px">修改端口或切换推理后端后需重启服务生效。</div>
     </div>
   </div>
 
@@ -189,13 +256,15 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   </div>
 </div>
 
-<div class="footer">随译 SuiYi · 腾讯 Hy-MT2-1.8B · 全程本地离线推理</div>
+<div class="footer">随译 SuiYi · 腾讯 Hy-MT2-1.8B · 本地离线 / OpenAI 兼容多后端</div>
 <div class="toast" id="toast"></div>
 
 <script>
 (function(){
   const $ = s => document.querySelector(s);
   let langs = [];
+  let backend = 'local';
+  let translating = false;
   const toast = msg => { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); };
 
   /* 主题切换：默认亮色，localStorage 记忆 */
@@ -233,10 +302,10 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       fill($('#cfgTarget'), 'en');
       const src = $('#srcLang');
       const cur = src.value;
-      src.innerHTML = '<option value="">自动检测</option>';
+      src.innerHTML = '<option value="">自动检测语言</option>';
       langs.forEach(l => {
         const o = document.createElement('option');
-        o.value = l.code; o.textContent = l.zh;
+        o.value = l.code; o.textContent = l.zh + ' (' + l.en + ')';
         src.appendChild(o);
       });
       src.value = cur || '';
@@ -244,49 +313,111 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   }
 
   /* 健康检查 */
-  let healthy = false;
   async function checkHealth(){
     try{
       const r = await fetch('/health');
       const d = await r.json();
-      healthy = !!d.engine;
+      backend = d.backend || 'local';
       const pill = $('#enginePill'), txt = $('#engineText');
       pill.className = 'pill ' + (d.engine ? 'ok' : 'warm');
-      txt.textContent = d.engine ? '引擎就绪' : '引擎加载中…';
+      txt.textContent = backend === 'openai'
+        ? (d.engine ? 'OpenAI 已配置' : 'OpenAI 未配置')
+        : (d.engine ? '引擎就绪' : '引擎加载中…');
       if (d.pending > 0) txt.textContent = '翻译队列 ' + d.pending + ' 条';
+      refreshAutoHint();
     }catch(e){
-      healthy = false;
       $('#enginePill').className = 'pill err'; $('#engineText').textContent = '服务离线';
     }
   }
 
-  /* 单句翻译 */
+  /* Google 式左右对照翻译 */
+  const srcText = $('#srcText'), resultText = $('#resultText'), autoToggle = $('#autoTranslate');
+  const langName = code => {
+    if(!code) return '自动检测';
+    for(const l of langs) if(l.code === code) return l.zh;
+    return code;
+  };
+  const refreshAutoHint = () => {
+    $('#autoHint').textContent = backend === 'openai'
+      ? '输入后自动翻译 · 调用 OpenAI 兼容 API'
+      : '输入后自动翻译 · 数据不出本机（本地后端）';
+  };
+  const updateTitles = () => {
+    $('#srcLang').title = '原文语言';
+    $('#dstLang').title = '目标语言';
+  };
   function setBtnLoading(btn, loading, label){
     btn.disabled = loading;
     btn.innerHTML = loading ? '<span class="spin"></span>' + (label||'翻译中…') : label;
   }
-  $('#btnTranslate').onclick = async () => {
-    const text = $('#srcText').value.trim();
-    if(!text){ toast('请输入文本'); return; }
-    const btn = $('#btnTranslate');
-    setBtnLoading(btn, true, '翻 译');
-    $('#resultCard').style.display = 'none';
+  async function doTranslate(){
+    const text = srcText.value;
+    if(!text.trim()){ resultText.textContent = '译文将显示在这里'; $('#charCount').textContent = ''; return; }
+    if(translating) return;
+    translating = true;
+    setBtnLoading($('#btnTranslate'), true, '翻 译');
+    resultText.classList.add('loading');
+    resultText.textContent = '';
     try{
       const r = await fetch('/translate', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({text, source: $('#srcLang').value, target: $('#dstLang').value})});
       const d = await r.json();
       if(d.ok){
-        $('#resultText').textContent = d.text;
-        $('#resultMeta').textContent = (d.source?('源语言 ' + d.source + ' · '):'') + '目标 ' + d.target + ' · ' + new Date().toLocaleTimeString();
-        $('#resultCard').style.display = '';
+        resultText.textContent = d.text;
+        $('#autoHint').textContent = (d.source && $('#srcLang').value==='' ? '检测到 ' + langName(d.source) + ' · ' : '') +
+          (backend === 'openai' ? 'OpenAI 兼容 API' : '本地离线推理');
       }else{
+        resultText.textContent = '错误：' + (d.error||'未知错误');
         toast('翻译失败：' + (d.error||'未知错误'));
-        $('#resultText').textContent = '错误：' + (d.error||'');
-        $('#resultCard').style.display = '';
       }
-    }catch(e){ toast('请求失败：' + e.message); }
-    finally{ setBtnLoading(btn, false, '翻 译'); }
+    }catch(e){
+      resultText.textContent = '请求失败：' + e.message;
+      toast('请求失败：' + e.message);
+    }finally{
+      translating = false;
+      resultText.classList.remove('loading');
+      setBtnLoading($('#btnTranslate'), false, '翻 译');
+      refreshAutoHint();
+    }
+  }
+  // 输入自动翻译（去抖）
+  let debounce = null;
+  srcText.addEventListener('input', () => {
+    $('#charCount').textContent = srcText.value.length ? srcText.value.length + ' 字' : '';
+    if(!autoToggle.checked) return;
+    clearTimeout(debounce);
+    debounce = setTimeout(doTranslate, 700);
+  });
+  $('#btnTranslate').onclick = () => { clearTimeout(debounce); doTranslate(); };
+  $('#clearBtn').onclick = () => {
+    srcText.value = ''; $('#charCount').textContent = '';
+    resultText.textContent = '译文将显示在这里';
+    clearTimeout(debounce);
+    srcText.focus();
   };
+  $('#pasteBtn').onclick = async () => {
+    try{ srcText.value = await navigator.clipboard.readText(); srcText.dispatchEvent(new Event('input')); }
+    catch(e){ toast('无法读取剪贴板：' + e.message); }
+  };
+  $('#copyBtn').onclick = async () => {
+    const t = resultText.textContent;
+    if(!t || t.startsWith('错误') || t.startsWith('请求失败')) return;
+    try{ await navigator.clipboard.writeText(t); toast('已复制译文'); }
+    catch(e){ toast('复制失败：' + e.message); }
+  };
+  $('#swapBtn').onclick = () => {
+    const s = $('#srcLang').value, d = $('#dstLang').value;
+    const srcTxt = srcText.value, dstTxt = resultText.textContent;
+    if(d){ $('#srcLang').value = d; } else { $('#srcLang').value = ''; }
+    $('#dstLang').value = s;
+    srcText.value = (dstTxt && !dstTxt.startsWith('译文') && !dstTxt.startsWith('错误') && !dstTxt.startsWith('请求失败'))
+      ? dstTxt : srcTxt;
+    $('#charCount').textContent = srcText.value.length ? srcText.value.length + ' 字' : '';
+    resultText.textContent = '译文将显示在这里';
+    clearTimeout(debounce);
+    if(autoToggle.checked && srcText.value.trim()) setTimeout(doTranslate, 300);
+  };
+  updateTitles();
 
   /* 批量翻译 */
   $('#btnBatch').onclick = async () => {
@@ -330,6 +461,9 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   });
 
   /* 设置 */
+  function syncOpenaiGroup(){
+    $('#openaiGroup').style.display = $('#cfgBackend').value === 'openai' ? '' : 'none';
+  }
   async function loadConfig(){
     try{
       const d = await (await fetch('/config')).json();
@@ -337,6 +471,12 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       $('#cfgSaveMem').checked = !!d.save_memory;
       $('#cfgClipboard').checked = d.clipboard_enabled !== false;
       $('#cfgPort').value = d.api_port || 8848;
+      $('#cfgModel').value = d.model_path || '';
+      $('#cfgBackend').value = d.backend || 'local';
+      $('#cfgOpenAIBase').value = d.openai_base_url || '';
+      $('#cfgOpenAIKey').value = d.openai_key || '';
+      $('#cfgOpenAIModel').value = d.openai_model || '';
+      syncOpenaiGroup();
     }catch(e){ toast('读取配置失败：' + e.message); }
   }
   function defaultConfig(){
@@ -344,7 +484,14 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     $('#cfgSaveMem').checked = false;
     $('#cfgClipboard').checked = true;
     $('#cfgPort').value = 8848;
+    $('#cfgModel').value = 'models/Hy-MT2-1.8B-Q4_K_M.gguf';
+    $('#cfgBackend').value = 'local';
+    $('#cfgOpenAIBase').value = 'https://api.openai.com/v1';
+    $('#cfgOpenAIKey').value = '';
+    $('#cfgOpenAIModel').value = 'gpt-4o-mini';
+    syncOpenaiGroup();
   }
+  $('#cfgBackend').onchange = syncOpenaiGroup;
   $('#btnSaveCfg').onclick = async () => {
     try{
       const r = await fetch('/config', {method:'PUT', headers:{'Content-Type':'application/json'},
@@ -352,10 +499,15 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           target_lang: $('#cfgTarget').value,
           save_memory: $('#cfgSaveMem').checked,
           clipboard_enabled: $('#cfgClipboard').checked,
-          api_port: parseInt($('#cfgPort').value) || 8848
+          api_port: parseInt($('#cfgPort').value) || 8848,
+          model_path: $('#cfgModel').value.trim(),
+          backend: $('#cfgBackend').value,
+          openai_base_url: $('#cfgOpenAIBase').value.trim(),
+          openai_key: $('#cfgOpenAIKey').value.trim(),
+          openai_model: $('#cfgOpenAIModel').value.trim()
         })});
       if(!r.ok) throw new Error((await r.json()).error);
-      toast('设置已保存');
+      toast('设置已保存' + ($('#cfgBackend').value !== backend ? '（重启后生效）' : ''));
     }catch(e){ toast('保存失败：' + e.message); }
   };
   $('#btnReset').onclick = defaultConfig;

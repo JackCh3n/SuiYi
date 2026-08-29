@@ -1,0 +1,340 @@
+# =============================================================================
+# 随译 SuiYi · CNB 云原生构建流水线
+#
+# 与 .github/workflows/build.yml（GitHub Actions）行为对齐：
+#   - 推送到 main 分支：跑测试 → 构建 11 个平台二进制
+#     → 生成日期版本号（v{YYYY_MMDD}，只到日）→ 创建 Release → 上传原始二进制附件
+#   - 推送 tag（如 git tag v2026_0825）：正式发版，版本号取 Tag 名
+#   - web_trigger 手动触发：与 main 推送相同流程
+#   - PR 事件：跑 go vet + go test 做质量门禁
+# 说明：二进制文件较小，不做 zip/tar.gz 打包，直接上传原始二进制。
+# =============================================================================
+
+# ── 公共构建环境（YAML 锚点复用） ──────────────────────────────────────────
+.build-env: &build-env
+  docker:
+    build:
+      dockerfile: .cnb/Dockerfile   # Go 构建环境（Go 1.25）
+      by:
+        - go.mod
+
+# ── 推送到 main：构建 + 发布 Release ───────────────────────────────────────
+main:
+  push:
+    - name: build-and-release
+      <<: *build-env
+      stages:
+        # 生成发布版本号（日期时间戳，只到日，与 GitHub Actions 的 v{YYYY_MMDD} 一致），
+        # 同时注入二进制便于识别构建来源。
+        - name: set-version
+          script: |
+            export TZ=Asia/Shanghai
+            VERSION="v$(date +%Y_%m%d)"
+            echo "==> 构建版本: $VERSION"
+            echo "##[set-output VERSION=${VERSION}]"
+          exports:
+            VERSION: RELEASE_VERSION
+
+        # 测试 + 静态检查
+        - name: test
+          script: |
+            set -e
+            go vet ./...
+            go test ./...
+
+        # 构建 11 个平台（与 GitHub Actions 矩阵一致，顺序执行保证产物落在
+        # 共享工作区，产物直接作为 Release 附件上传）
+        - name: build-binaries
+          script: |
+            set -e
+            export TZ=Asia/Shanghai
+            mkdir -p dist
+            # 直接 go build（勿用 BUILD="...\"...\"" 变量写法：bash 展开不会二次解析
+            # 引号，会把 -ldflags 拆断为 "-s 导致 invalid value 报错）。
+            CGO_ENABLED=0 GOOS=linux   GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-amd64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-arm64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=arm GOARM=7 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-arm .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=386     go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-386 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=loong64 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-loong64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=riscv64 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-riscv64 .
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-amd64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-arm64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=386     go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-386.exe .
+            CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-darwin-amd64 .
+            CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-darwin-arm64 .
+            ls -lh dist/
+
+        # 生成 Release 描述（含支持平台表格）
+        - name: gen-release-notes
+          script: |
+            cat > RELEASE_NOTES.md <<EOF
+            ## 随译 SuiYi $RELEASE_VERSION
+
+            > 由 CNB 云原生构建在推送 main 时自动生成（与 GitHub Actions 构建流程一致）
+            > 本地离线 / OpenAI 兼容多后端翻译服务（Go + llama.cpp）
+
+            ### 支持平台
+
+            | 平台 | 架构 | 文件 |
+            |------|------|------|
+            | Windows | x86_64 | suiyi-windows-amd64.exe |
+            | Windows | ARM64 | suiyi-windows-arm64.exe |
+            | Windows | x86 | suiyi-windows-386.exe |
+            | Linux | x86_64 | suiyi-linux-amd64 |
+            | Linux | x86 | suiyi-linux-386 |
+            | Linux | ARM64 | suiyi-linux-arm64 |
+            | Linux | ARMv7 | suiyi-linux-arm |
+            | Linux | LoongArch64 | suiyi-linux-loong64 |
+            | Linux | RISC-V 64 | suiyi-linux-riscv64 |
+            | macOS | x86_64 (Intel) | suiyi-darwin-amd64 |
+            | macOS | ARM64 (Apple Silicon) | suiyi-darwin-arm64 |
+
+            ### 快速使用
+
+            > 运行时还需要对应平台的 llama-server（llama.cpp）与 GGUF 模型。
+
+            ```bash
+            # Windows（先放入 llama-server.exe 与模型）
+            suiyi-windows-amd64.exe serve
+
+            # Linux/macOS（先赋予执行权限）
+            chmod +x suiyi-linux-amd64
+            ./suiyi-linux-amd64 serve
+            ```
+            EOF
+            cat RELEASE_NOTES.md
+
+        # 创建 Release（同日多次推送更新同一 Release）
+        - name: create-release
+          type: git:release
+          options:
+            tag: $RELEASE_VERSION
+            title: $RELEASE_VERSION
+            descriptionFromFile: RELEASE_NOTES.md
+            latest: true
+          exports:
+            version: RELEASE_VERSION
+
+        # 将原始二进制上传为 Release 附件
+        - name: upload-attachments
+          image: cnbcool/attachments:latest
+          settings:
+            tag: $RELEASE_VERSION
+            attachments:
+              - "./dist/*"
+      endStages:
+        - name: summary
+          script: |
+            echo "Build $CNB_BUILD_ID finished"
+            echo "Release version: ${RELEASE_VERSION:-<none>}"
+            ls -lh dist/ || true
+
+# ── Tag 推送：正式发版（版本号取 Tag 名） ──────────────────────────────────
+"$":
+  tag_push:
+    - name: release-build
+      <<: *build-env
+      stages:
+        # 正式发版：版本号取 Tag 名（如 git tag v2026_0825）
+        - name: set-version
+          script: |
+            VERSION="$CNB_BRANCH"
+            echo "==> 发版版本: $VERSION"
+            echo "##[set-output VERSION=$VERSION]"
+          exports:
+            VERSION: RELEASE_VERSION
+
+        - name: test
+          script: |
+            set -e
+            go vet ./...
+            go test ./...
+
+        - name: build-binaries
+          script: |
+            set -e
+            export TZ=Asia/Shanghai
+            mkdir -p dist
+            CGO_ENABLED=0 GOOS=linux   GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-amd64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-arm64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=arm GOARM=7 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-arm .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=386     go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-386 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=loong64 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-loong64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=riscv64 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-riscv64 .
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-amd64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-arm64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=386     go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-386.exe .
+            CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-darwin-amd64 .
+            CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-darwin-arm64 .
+            ls -lh dist/
+
+        - name: gen-release-notes
+          script: |
+            cat > RELEASE_NOTES.md <<EOF
+            ## 随译 SuiYi $RELEASE_VERSION
+
+            > 由 CNB 云原生构建在 Tag 推送时正式发布
+
+            ### 支持平台
+
+            | 平台 | 架构 | 文件 |
+            |------|------|------|
+            | Windows | x86_64 | suiyi-windows-amd64.exe |
+            | Windows | ARM64 | suiyi-windows-arm64.exe |
+            | Windows | x86 | suiyi-windows-386.exe |
+            | Linux | x86_64 | suiyi-linux-amd64 |
+            | Linux | x86 | suiyi-linux-386 |
+            | Linux | ARM64 | suiyi-linux-arm64 |
+            | Linux | ARMv7 | suiyi-linux-arm |
+            | Linux | LoongArch64 | suiyi-linux-loong64 |
+            | Linux | RISC-V 64 | suiyi-linux-riscv64 |
+            | macOS | x86_64 (Intel) | suiyi-darwin-amd64 |
+            | macOS | ARM64 (Apple Silicon) | suiyi-darwin-arm64 |
+
+            ### 快速使用
+
+            > 运行时还需要对应平台的 llama-server（llama.cpp）与 GGUF 模型。
+
+            ```bash
+            # Windows（先放入 llama-server.exe 与模型）
+            suiyi-windows-amd64.exe serve
+
+            # Linux/macOS（先赋予执行权限）
+            chmod +x suiyi-linux-amd64
+            ./suiyi-linux-amd64 serve
+            ```
+            EOF
+            cat RELEASE_NOTES.md
+
+        - name: create-release
+          type: git:release
+          options:
+            tag: $RELEASE_VERSION
+            title: $RELEASE_VERSION
+            descriptionFromFile: RELEASE_NOTES.md
+            latest: true
+
+        - name: upload-attachments
+          image: cnbcool/attachments:latest
+          settings:
+            tag: $RELEASE_VERSION
+            attachments:
+              - "./dist/*"
+      endStages:
+        - name: summary
+          script: |
+            echo "Build $CNB_BUILD_ID finished"
+            echo "Release version: ${RELEASE_VERSION:-<none>}"
+            ls -lh dist/ || true
+
+  # ── 手动触发：与 main 推送相同流程 ──────────────────────────────────────
+  web_trigger:
+    - name: manual-release
+      <<: *build-env
+      stages:
+        - name: set-version
+          script: |
+            export TZ=Asia/Shanghai
+            VERSION="v$(date +%Y_%m%d)"
+            echo "==> 构建版本: $VERSION"
+            echo "##[set-output VERSION=${VERSION}]"
+          exports:
+            VERSION: RELEASE_VERSION
+
+        - name: test
+          script: |
+            set -e
+            go vet ./...
+            go test ./...
+
+        - name: build-binaries
+          script: |
+            set -e
+            export TZ=Asia/Shanghai
+            mkdir -p dist
+            CGO_ENABLED=0 GOOS=linux   GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-amd64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-arm64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=arm GOARM=7 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-arm .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=386     go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-386 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=loong64 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-loong64 .
+            CGO_ENABLED=0 GOOS=linux   GOARCH=riscv64 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-riscv64 .
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-amd64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-arm64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=386     go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-386.exe .
+            CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-darwin-amd64 .
+            CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-darwin-arm64 .
+            ls -lh dist/
+
+        - name: gen-release-notes
+          script: |
+            cat > RELEASE_NOTES.md <<EOF
+            ## 随译 SuiYi $RELEASE_VERSION
+
+            > 由 CNB 云原生构建手动触发生成
+
+            ### 支持平台
+
+            | 平台 | 架构 | 文件 |
+            |------|------|------|
+            | Windows | x86_64 | suiyi-windows-amd64.exe |
+            | Windows | ARM64 | suiyi-windows-arm64.exe |
+            | Windows | x86 | suiyi-windows-386.exe |
+            | Linux | x86_64 | suiyi-linux-amd64 |
+            | Linux | x86 | suiyi-linux-386 |
+            | Linux | ARM64 | suiyi-linux-arm64 |
+            | Linux | ARMv7 | suiyi-linux-arm |
+            | Linux | LoongArch64 | suiyi-linux-loong64 |
+            | Linux | RISC-V 64 | suiyi-linux-riscv64 |
+            | macOS | x86_64 (Intel) | suiyi-darwin-amd64 |
+            | macOS | ARM64 (Apple Silicon) | suiyi-darwin-arm64 |
+
+            ### 快速使用
+
+            > 运行时还需要对应平台的 llama-server（llama.cpp）与 GGUF 模型。
+
+            ```bash
+            # Windows（先放入 llama-server.exe 与模型）
+            suiyi-windows-amd64.exe serve
+
+            # Linux/macOS（先赋予执行权限）
+            chmod +x suiyi-linux-amd64
+            ./suiyi-linux-amd64 serve
+            ```
+            EOF
+            cat RELEASE_NOTES.md
+
+        - name: create-release
+          type: git:release
+          options:
+            tag: $RELEASE_VERSION
+            title: $RELEASE_VERSION
+            descriptionFromFile: RELEASE_NOTES.md
+            latest: true
+
+        - name: upload-attachments
+          image: cnbcool/attachments:latest
+          settings:
+            tag: $RELEASE_VERSION
+            attachments:
+              - "./dist/*"
+      endStages:
+        - name: summary
+          script: |
+            echo "Build $CNB_BUILD_ID finished"
+            echo "Release version: ${RELEASE_VERSION:-<none>}"
+            ls -lh dist/ || true
+
+# ── PR：质量门禁（vet + test） ─────────────────────────────────────────────
+"**":
+  pull_request:
+    - name: pr-check
+      <<: *build-env
+      stages:
+        - name: vet
+          script: |
+            set -e
+            go vet ./...
+        - name: test
+          script: |
+            set -e
+            go test ./...
