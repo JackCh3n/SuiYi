@@ -93,7 +93,7 @@ func runServe(args []string) int {
 				job.Done <- fmt.Errorf("当前后端不支持流式输出")
 				return
 			}
-			if err := translateStream(ctx, streamer, sj.Req, sj.Emit, sj.Progress); err != nil {
+			if err := translateStream(sj.Ctx, streamer, sj.Req, sj.Emit, sj.Progress); err != nil {
 				job.Done <- err
 				return
 			}

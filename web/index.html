@@ -49,6 +49,13 @@ textarea{width:100%;min-height:120px;resize:vertical;line-height:1.6}
 .btn:hover{background:var(--primary-hover)}
 .btn:disabled{opacity:.55;cursor:not-allowed}
 .btn.ghost{background:var(--primary-bg);color:var(--primary)}
+.btn.danger{background:var(--err)}
+.btn.danger:hover{background:#d92c2c}
+.quick-tabs{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.qt-label{font-size:12px;color:var(--sub)}
+.qt{cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--sub);padding:4px 12px;border-radius:16px;font-size:12px}
+.qt:hover{color:var(--primary);border-color:var(--primary)}
+.qt.active{background:var(--primary-bg);color:var(--primary);border-color:var(--primary);font-weight:500}
 .out{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;min-height:120px;font-size:14px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
 .meta{font-size:12px;color:var(--sub);margin-top:8px}
 .hint{font-size:12px;color:var(--sub);margin-bottom:8px}
@@ -132,6 +139,13 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   <!-- 翻译（Google 式左右对照） -->
   <div class="pane active" id="p-translate">
     <div class="card translate-card">
+      <div class="quick-tabs">
+        <span class="qt-label">快捷：</span>
+        <button class="qt" data-src="en" data-dst="zh">英 → 中</button>
+        <button class="qt" data-src="ja" data-dst="zh">日 → 中</button>
+        <button class="qt" data-src="ko" data-dst="zh">韩 → 中</button>
+        <button class="qt" data-src="" data-dst="zh">自动 → 中</button>
+      </div>
       <div class="langbar">
         <select id="srcLang" title="原文语言">
           <option value="">自动检测语言</option>
@@ -171,7 +185,10 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
         </label>
         <span class="hint" id="autoHint"></span>
         <span class="hint" id="charCount"></span>
-        <button class="btn" id="btnTranslate">翻 译</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn danger" id="btnStop" style="display:none">停 止</button>
+          <button class="btn" id="btnTranslate">翻 译</button>
+        </div>
       </div>
     </div>
   </div>
@@ -284,6 +301,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   let langs = [];
   let backend = 'local';
   let translating = false;
+  let abortCtrl = null; // 当前翻译请求的 AbortController（停止用）
   const toast = msg => { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); };
 
   /* 主题切换：默认亮色，localStorage 记忆 */
@@ -374,7 +392,9 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     if(!text.trim()){ resultText.textContent = '译文将显示在这里'; $('#charCount').textContent = ''; return; }
     if(translating) return;
     translating = true;
+    abortCtrl = new AbortController();
     setBtnLoading($('#btnTranslate'), true, '翻 译');
+    $('#btnStop').style.display = '';
     resultText.classList.add('loading');
     resultText.textContent = '';
     $('#progWrap').style.display = '';
@@ -386,7 +406,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     try{
       // 流式：逐段增量展示 + 进度条（百分比 / 预计剩余秒数 / token/s）
       const resp = await fetch('/translate/stream', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({text, source: $('#srcLang').value, target: $('#dstLang').value})});
+        body: JSON.stringify({text, source: $('#srcLang').value, target: $('#dstLang').value}), signal: abortCtrl.signal});
       if(!resp.ok || !resp.body){
         let d = {}; try{ d = await resp.json(); }catch(e){}
         throw new Error(d.error || ('HTTP ' + resp.status));
@@ -431,15 +451,24 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       if(!full) resultText.textContent = '（未生成内容）';
     }catch(e){
       hideProg();
-      resultText.textContent = resultText.textContent || '错误：' + e.message;
-      toast('翻译失败：' + e.message);
+      if(e.name === 'AbortError'){
+        // 用户点击停止：保留已生成的部分译文
+        resultText.textContent = full || resultText.textContent;
+        toast('已停止翻译');
+      }else{
+        resultText.textContent = resultText.textContent || '错误：' + e.message;
+        toast('翻译失败：' + e.message);
+      }
     }finally{
       translating = false;
+      abortCtrl = null;
+      $('#btnStop').style.display = 'none';
       resultText.classList.remove('loading');
       setBtnLoading($('#btnTranslate'), false, '翻 译');
       refreshAutoHint();
     }
   }
+  $('#btnStop').onclick = () => { if(abortCtrl) abortCtrl.abort(); };
   // 输入自动翻译（去抖）
   let debounce = null;
   srcText.addEventListener('input', () => {
@@ -478,6 +507,24 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     if(autoToggle.checked && srcText.value.trim()) setTimeout(doTranslate, 300);
   };
   updateTitles();
+
+  /* 快捷翻译标签：英中 / 日中 / 韩中 / 自动中 */
+  function updateQuickActive(){
+    const s = $('#srcLang').value, d = $('#dstLang').value;
+    document.querySelectorAll('.qt').forEach(b => {
+      b.classList.toggle('active', b.dataset.src === s && b.dataset.dst === d);
+    });
+  }
+  document.querySelectorAll('.qt').forEach(b => b.onclick = () => {
+    $('#srcLang').value = b.dataset.src;
+    $('#dstLang').value = b.dataset.dst;
+    updateQuickActive();
+    clearTimeout(debounce);
+    if(srcText.value.trim()) setTimeout(doTranslate, 200);
+    else srcText.focus();
+  });
+  $('#srcLang').onchange = updateQuickActive;
+  $('#dstLang').onchange = updateQuickActive;
 
   /* 批量翻译 */
   $('#btnBatch').onclick = async () => {

@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -174,8 +175,9 @@ func (s *Server) handleTranslate(w http.ResponseWriter, r *http.Request) {
 
 // StreamJob 流式翻译任务（由队列 worker 调用后端流式生成，逐块写回）
 type StreamJob struct {
-	Req      *TranslateRequest                                  // 请求
-	Emit     func(string) error                                 // 每段增量内容回调；返回错误则中止
+	Ctx      context.Context                                       // 可取消上下文：客户端断开/点击停止时取消，从而中止生成
+	Req      *TranslateRequest                                     // 请求
+	Emit     func(string) error                                    // 每段增量内容回调；返回错误则中止
 	Progress func(pct float64, stage string, eta int, tps float64) // 进度回调：pct 0~1，eta 预计剩余秒（-1=未知），tps 生成速度
 }
 
@@ -190,6 +192,8 @@ func writeSSE(w http.ResponseWriter, v any) error {
 }
 
 // handleTranslateStream 流式单句翻译（text/event-stream，逐段增量返回）
+// 安全设计：worker 只向事件通道发送事件，仅本 handler goroutine 写 ResponseWriter；
+// 客户端断开/刷新/点击停止时取消流式上下文，worker 随即停止，彻底避免进程崩溃。
 func (s *Server) handleTranslateStream(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, 405, map[string]string{"error": "仅支持 POST"})
@@ -210,6 +214,27 @@ func (s *Server) handleTranslateStream(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Target = target
 
+	// 流式上下文随客户端请求取消（断开/刷新/停止）而取消
+	streamCtx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	// 事件通道：worker 生产，本 goroutine 消费并写出（唯一写 w 的 goroutine）
+	events := make(chan map[string]any, 32)
+	emit := func(chunk string) error {
+		select {
+		case events <- map[string]any{"delta": chunk}:
+			return nil
+		case <-streamCtx.Done():
+			return streamCtx.Err()
+		}
+	}
+	progress := func(pct float64, stage string, eta int, tps float64) {
+		select {
+		case events <- map[string]any{"progress": pct, "stage": stage, "eta": eta, "tps": tps}:
+		case <-streamCtx.Done():
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -219,37 +244,51 @@ func (s *Server) handleTranslateStream(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	emit := func(chunk string) error {
-		if err := writeSSE(w, map[string]any{"delta": chunk}); err != nil {
-			return err
-		}
-		if flusher != nil {
-			flusher.Flush()
-		}
-		return nil
-	}
-	progress := func(pct float64, stage string, eta int, tps float64) {
-		_ = writeSSE(w, map[string]any{"progress": pct, "stage": stage, "eta": eta, "tps": tps})
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
+	done := s.q.Submit(&queue.Job{Type: "translate-stream", Args: &StreamJob{Ctx: streamCtx, Req: &req, Emit: emit, Progress: progress}})
 
-	done := s.q.Submit(&queue.Job{Type: "translate-stream", Args: &StreamJob{Req: &req, Emit: emit, Progress: progress}})
-	select {
-	case res := <-done:
-		if err, ok := res.(error); ok {
-			s.addLog("流式翻译失败: %v", err)
-			_ = writeSSE(w, map[string]any{"error": err.Error()})
-		} else {
-			s.addLog("流式翻译: %q (%s→%s)", truncate(req.Text, 30), req.Source, target)
-			_ = writeSSE(w, map[string]any{"done": true, "source": req.Source, "target": target})
+	// 事件泵：仅在此处写 ResponseWriter
+	for {
+		select {
+		case ev := <-events:
+			if err := writeSSE(w, ev); err != nil {
+				cancel()
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		case res := <-done:
+			if r.Context().Err() != nil {
+				return // 客户端已断开，不回写
+			}
+			// 先清空尚未写出的缓冲事件，再写结束事件
+			for {
+				select {
+				case ev := <-events:
+					_ = writeSSE(w, ev)
+					if flusher != nil {
+						flusher.Flush()
+					}
+				default:
+					goto finish
+				}
+			}
+		finish:
+			if err, ok := res.(error); ok {
+				s.addLog("流式翻译失败: %v", err)
+				_ = writeSSE(w, map[string]any{"error": err.Error()})
+			} else {
+				s.addLog("流式翻译: %q (%s→%s)", truncate(req.Text, 30), req.Source, target)
+				_ = writeSSE(w, map[string]any{"done": true, "source": req.Source, "target": target})
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+			return
+		case <-r.Context().Done():
+			cancel() // 通知 worker 停止生成
+			return
 		}
-	case <-r.Context().Done():
-		_ = writeSSE(w, map[string]any{"error": "客户端断开"})
-	}
-	if flusher != nil {
-		flusher.Flush()
 	}
 }
 
