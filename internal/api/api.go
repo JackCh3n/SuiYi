@@ -55,7 +55,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/translate", s.handleTranslate)
 	mux.HandleFunc("/translate/stream", s.handleTranslateStream)
-	mux.HandleFunc("/batch", s.handleBatch)
 	mux.HandleFunc("/languages", s.handleLanguages)
 	mux.HandleFunc("/models", s.handleModels)
 	mux.HandleFunc("/config", s.handleConfig)
@@ -292,57 +291,6 @@ func (s *Server) handleTranslateStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// BatchRequest 批量翻译请求
-type BatchRequest struct {
-	Items  []TranslateRequest `json:"items"`
-	Source string             `json:"source,omitempty"`
-	Target string             `json:"target,omitempty"`
-}
-
-func (s *Server) handleBatch(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeJSON(w, 405, map[string]string{"error": "仅支持 POST"})
-		return
-	}
-	var req BatchRequest
-	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, 400, map[string]string{"error": "请求体无效: " + err.Error()})
-		return
-	}
-	if len(req.Items) == 0 {
-		writeJSON(w, 400, map[string]string{"error": "items 不能为空"})
-		return
-	}
-
-	results := make([]TranslateResult, len(req.Items))
-	for i := range req.Items {
-		if req.Items[i].Target == "" {
-			req.Items[i].Target = req.Target
-		}
-		if req.Items[i].Source == "" {
-			req.Items[i].Source = req.Source
-		}
-		if req.Items[i].Target == "" {
-			req.Items[i].Target = s.cfg.TargetLang
-		}
-		// 逐条入队，保持顺序
-		id := fmt.Sprintf("batch-%d-%d", time.Now().UnixNano(), i)
-		done := s.q.Submit(&queue.Job{ID: id, Type: "translate", Args: &req.Items[i]})
-		select {
-		case res := <-done:
-			switch v := res.(type) {
-			case *TranslateResult:
-				results[i] = *v
-			case error:
-				results[i] = TranslateResult{Ok: false, Text: "", Target: req.Items[i].Target, Error: v.Error()}
-			}
-		case <-r.Context().Done():
-			results[i] = TranslateResult{Ok: false, Text: "", Target: req.Items[i].Target, Error: "超时"}
-		}
-	}
-	writeJSON(w, 200, map[string]any{"items": results})
-}
-
 func (s *Server) handleLanguages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, Languages)
 }
@@ -404,6 +352,8 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 400, map[string]string{"error": err.Error()})
 			return
 		}
+		oldModel := s.cfg.ModelPath
+		modelChanged := patch.ModelPath != nil && *patch.ModelPath != oldModel
 		if patch.APIPort != nil {
 			s.cfg.APIPort = *patch.APIPort
 		}
@@ -448,6 +398,18 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.addLog("配置已更新")
+		// 本地后端：模型路径变化时立即切换运行中的引擎（失败自动回退）
+		if modelChanged && s.cfg.Backend == "local" && s.eng != nil {
+			s.addLog("正在切换模型: %s", s.cfg.ModelPath)
+			if err := s.eng.SetModel(s.cfg.ModelPath); err != nil {
+				s.cfg.ModelPath = oldModel
+				_ = s.cfg.Save()
+				s.addLog("模型切换失败，已回退: %v", err)
+				writeJSON(w, 200, map[string]any{"ok": false, "error": "模型切换失败，已回退旧模型", "config": s.cfg})
+				return
+			}
+			s.addLog("模型已切换: %s", s.cfg.ModelPath)
+		}
 		writeJSON(w, 200, s.cfg)
 	default:
 		writeJSON(w, 405, map[string]string{"error": "仅支持 GET/PUT"})

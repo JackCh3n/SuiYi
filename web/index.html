@@ -131,7 +131,6 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
 <div class="wrap">
   <nav class="tabs">
     <div class="tab active" data-pane="p-translate">翻译</div>
-    <div class="tab" data-pane="p-batch">批量翻译</div>
     <div class="tab" data-pane="p-config">设置</div>
     <div class="tab" data-pane="p-logs">日志</div>
   </nav>
@@ -162,8 +161,9 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           <div class="pane-head">
             <span class="pane-title">原文</span>
             <span class="pane-tools">
-              <button class="icon-btn" id="clearBtn" title="清空原文">清空</button>
+              <button class="icon-btn" id="copySrcBtn" title="复制原文">复制</button>
               <button class="icon-btn" id="pasteBtn" title="粘贴剪贴板">粘贴</button>
+              <button class="icon-btn" id="clearBtn" title="清空原文">清空</button>
             </span>
           </div>
           <textarea id="srcText" placeholder="输入文本，或点击粘贴…"></textarea>
@@ -190,29 +190,6 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           <button class="btn" id="btnTranslate">翻 译</button>
         </div>
       </div>
-    </div>
-  </div>
-
-  <!-- 批量翻译 -->
-  <div class="pane" id="p-batch">
-    <div class="card">
-      <h2>📚 批量翻译</h2>
-      <div class="row">
-        <div style="flex:1">
-          <label>翻译为</label><br>
-          <select id="batchDst" style="width:100%;margin-top:6px"></select>
-        </div>
-        <button class="btn" id="btnBatch">开始批量翻译</button>
-      </div>
-      <div class="hint">每行一条文本，按顺序串行处理。完成后结果在上方表格展示。</div>
-      <textarea id="batchText" placeholder="第一行文本&#10;第二行文本&#10;…"></textarea>
-    </div>
-    <div class="card" id="batchResultCard" style="display:none">
-      <h2>📋 批量结果 <span style="font-size:12px;color:var(--sub);font-weight:400" id="batchStat"></span></h2>
-      <table>
-        <thead><tr><th style="width:42%">原文</th><th style="width:42%">译文</th><th style="width:16%">状态</th></tr></thead>
-        <tbody id="batchTbody"></tbody>
-      </table>
     </div>
   </div>
 
@@ -335,7 +312,6 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
         if (cur) sel.value = cur;
       };
       fill($('#dstLang'), 'zh');
-      fill($('#batchDst'), 'zh');
       fill($('#cfgTarget'), 'zh');
       const src = $('#srcLang');
       const cur = src.value;
@@ -494,6 +470,12 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     try{ await navigator.clipboard.writeText(t); toast('已复制译文'); }
     catch(e){ toast('复制失败：' + e.message); }
   };
+  $('#copySrcBtn').onclick = async () => {
+    const t = srcText.value;
+    if(!t){ toast('原文为空'); return; }
+    try{ await navigator.clipboard.writeText(t); toast('已复制原文'); }
+    catch(e){ toast('复制失败：' + e.message); }
+  };
   $('#swapBtn').onclick = () => {
     const s = $('#srcLang').value, d = $('#dstLang').value;
     const srcTxt = srcText.value, dstTxt = resultText.textContent;
@@ -525,47 +507,6 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   });
   $('#srcLang').onchange = updateQuickActive;
   $('#dstLang').onchange = updateQuickActive;
-
-  /* 批量翻译 */
-  $('#btnBatch').onclick = async () => {
-    const lines = $('#batchText').value.split('\n').map(s=>s.trim()).filter(Boolean);
-    if(!lines.length){ toast('请输入要翻译的文本'); return; }
-    const btn = $('#btnBatch');
-    setBtnLoading(btn, true, '翻译中…');
-    const tb = $('#batchTbody'); tb.innerHTML = '';
-    $('#batchResultCard').style.display = '';
-    lines.forEach((ln,i)=>{
-      const tr = document.createElement('tr');
-      tr.innerHTML = '<td></td><td class="err-c">等待中…</td><td>排队</td>';
-      tb.appendChild(tr);
-    });
-    try{
-      const r = await fetch('/batch', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({items: lines.map(t=>({text:t})), target: $('#batchDst').value})});
-      const d = await r.json();
-      const rows = tb.children;
-      let failed = 0;
-      d.items.forEach((it,i)=>{
-        const tr = rows[i];
-        tr.cells[0].textContent = lines[i];
-        if(it.ok){
-          tr.cells[1].innerHTML = it.text + '<span class="copy" data-t="'+encodeURIComponent(it.text)+'">复制</span>';
-          tr.cells[2].className = 'ok-c'; tr.cells[2].textContent = '成功';
-        }else{
-          tr.cells[1].textContent = it.error || '失败';
-          tr.cells[2].className = 'err-c'; tr.cells[2].textContent = '失败'; failed++;
-        }
-      });
-      $('#batchStat').textContent = '· 成功 ' + (d.items.length - failed) + ' / ' + d.items.length;
-      if(d.items.every(x=>x.ok)) toast('批量翻译完成');
-    }catch(e){ toast('批量请求失败：' + e.message); }
-    finally{ setBtnLoading(btn, false, '开始批量翻译'); }
-  };
-  $('#batchTbody').addEventListener('click', e => {
-    if(e.target.classList.contains('copy')){
-      navigator.clipboard.writeText(decodeURIComponent(e.target.dataset.t)).then(()=>toast('已复制译文'));
-    }
-  });
 
   /* 设置 */
   function syncOpenaiGroup(){
@@ -605,7 +546,6 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       const target = d.target_lang || 'zh';
       $('#cfgTarget').value = target;
       $('#dstLang').value = target;      // 翻译页默认目标语言跟随配置
-      $('#batchDst').value = target;     // 批量翻译默认目标语言跟随配置
       $('#cfgSaveMem').checked = !!d.save_memory;
       $('#cfgClipboard').checked = d.clipboard_enabled !== false;
       $('#cfgPort').value = d.api_port || 8848;
@@ -621,7 +561,6 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   function defaultConfig(){
     $('#cfgTarget').value = 'zh';
     $('#dstLang').value = 'zh';
-    $('#batchDst').value = 'zh';
     $('#cfgSaveMem').checked = false;
     $('#cfgClipboard').checked = true;
     $('#cfgPort').value = 8848;
@@ -649,12 +588,16 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           openai_key: $('#cfgOpenAIKey').value.trim(),
           openai_model: $('#cfgOpenAIModel').value.trim()
         })});
-      if(!r.ok) throw new Error((await r.json()).error);
+      const d = await r.json();
+      if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+      if(d && d.ok === false) throw new Error(d.error || '保存失败');
       // 保存后立即同步翻译页默认语言
       $('#dstLang').value = $('#cfgTarget').value;
-      $('#batchDst').value = $('#cfgTarget').value;
       toast('设置已保存' + ($('#cfgBackend').value !== backend ? '（重启后生效）' : ''));
-    }catch(e){ toast('保存失败：' + e.message); }
+    }catch(e){
+      toast('保存失败：' + e.message);
+      loadConfig(); // 失败（如模型切换回退）后刷新设置页显示实际值
+    }
   };
   $('#btnReset').onclick = defaultConfig;
 

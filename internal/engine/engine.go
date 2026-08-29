@@ -27,10 +27,12 @@ type Engine struct {
 	started    bool
 	logFile    *os.File
 	restarting bool
+	switching  bool // 正在切换模型：期间禁止 waitHealthy 自动重启
 
 	client      *http.Client // 健康检查客户端（短超时）
 	inferClient *http.Client // 推理请求客户端（无固定超时，靠 context 控制）
 	ready       chan struct{}
+	readyOnce   sync.Once // 每次启动重建，保证就绪通道只被关闭一次
 }
 
 // Config 引擎启动参数
@@ -101,10 +103,76 @@ func (e *Engine) Start(ctx context.Context) error {
 		return fmt.Errorf("启动 llama-server 失败: %w", err)
 	}
 	e.started = true
-
-	// 后台等待就绪
-	go e.waitHealthy(context.Background())
+	e.readyOnce = sync.Once{}              // 每次启动重置，允许重建就绪通道
+	e.ready = make(chan struct{})          // 每次启动重建就绪通道
+	go e.reap()                            // 收割进程：进程退出后填充 ProcessState，供退出检测
+	go e.waitHealthy(context.Background()) // 后台等待就绪
 	return nil
+}
+
+// reap 等待子进程退出并填充 ProcessState（供 waitHealthy/SetModel 检测进程退出）
+func (e *Engine) reap() {
+	if e.cmd != nil && e.cmd.Process != nil {
+		_ = e.cmd.Wait()
+	}
+}
+
+// SetModel 切换本地引擎模型：停旧引擎 → 用新模型启动 → 等待就绪；失败自动回退旧模型
+func (e *Engine) SetModel(modelPath string) error {
+	newAbs := config.Resolve(modelPath)
+	if _, err := os.Stat(newAbs); err != nil {
+		return fmt.Errorf("模型文件不存在: %s", modelPath)
+	}
+	old := e.cfg.ModelPath
+	if config.Resolve(old) == newAbs {
+		return nil // 模型未变化
+	}
+	log.Printf("[engine] 切换模型: %s → %s", old, newAbs)
+	e.mu.Lock()
+	e.switching = true
+	e.cfg.ModelPath = modelPath
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		e.switching = false
+		e.mu.Unlock()
+	}()
+
+	if err := e.Stop(); err != nil {
+		return err
+	}
+	if err := e.Start(context.Background()); err != nil {
+		e.revertModel(old)
+		return fmt.Errorf("切换模型失败，已回退: %w", err)
+	}
+	// 等待就绪：健康 OK 立即返回；进程快速退出（模型加载失败）立即回退
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		if e.Healthy() {
+			log.Printf("[engine] 模型已切换: %s", newAbs)
+			return nil
+		}
+		e.mu.Lock()
+		exited := e.started && e.cmd != nil && e.cmd.ProcessState != nil && e.cmd.ProcessState.Exited()
+		e.mu.Unlock()
+		if exited {
+			e.revertModel(old)
+			return fmt.Errorf("模型加载失败，已回退旧模型")
+		}
+		if time.Now().After(deadline) {
+			e.revertModel(old)
+			return fmt.Errorf("模型加载超时，已回退旧模型")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// revertModel 回退到旧模型并重启引擎
+func (e *Engine) revertModel(old string) {
+	log.Printf("[engine] 回退模型: %s", old)
+	e.cfg.ModelPath = old
+	_ = e.Stop()
+	_ = e.Start(context.Background())
 }
 
 func (e *Engine) logPath() string {
@@ -137,16 +205,22 @@ func (e *Engine) waitHealthy(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+			e.mu.Lock()
+			switching := e.switching
+			e.mu.Unlock()
 			if time.Now().After(deadline) {
+				if switching {
+					return // 切换中由 SetModel 负责处理
+				}
 				e.restart("引擎启动超时")
 				return
 			}
 			ok, _ := e.checkHealth()
 			if ok {
-				close(e.ready)
+				e.readyOnce.Do(func() { close(e.ready) }) // 并发 waitHealthy 也只关闭一次
 				return
 			}
-			// 进程意外退出则重启
+			// 进程意外退出则重启（切换中除外）
 			exit := false
 			e.mu.Lock()
 			if e.started && e.cmd != nil && e.cmd.ProcessState != nil && e.cmd.ProcessState.Exited() {
@@ -154,6 +228,9 @@ func (e *Engine) waitHealthy(ctx context.Context) {
 			}
 			e.mu.Unlock()
 			if exit {
+				if switching {
+					return // 切换中由 SetModel 负责处理
+				}
 				e.restart("引擎进程退出")
 				return
 			}
