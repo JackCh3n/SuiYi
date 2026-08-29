@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -25,6 +26,7 @@ import (
 	"suiyi/internal/config"
 	"suiyi/internal/engine"
 	"suiyi/internal/queue"
+	"suiyi/internal/tray"
 )
 
 // version 构建版本号，由 CI 通过 -ldflags "-X main.version=..." 注入
@@ -155,12 +157,27 @@ func runServe(args []string) int {
 		}()
 	}
 
-	// 等待退出信号
+	// 系统托盘（非 headless 时）：打开界面 / 退出
+	quitCh := make(chan struct{})
+	if !cfg.Headless {
+		webURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.APIPort)
+		go tray.Run(func() { _ = openBrowser(webURL) }, func() { close(quitCh) })
+	}
+
+	// 等待退出信号（Ctrl+C / 托盘退出）
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-	<-ch
+	select {
+	case <-ch:
+	case <-quitCh:
+	}
 	fmt.Println("\n正在退出…")
 	return 0
+}
+
+// openBrowser 打开默认浏览器（Windows）
+func openBrowser(url string) error {
+	return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 }
 
 // truncateRunes 按字符截断（避免截断多字节字符）
