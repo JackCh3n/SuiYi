@@ -93,6 +93,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
 .pane-box{flex:1;min-width:0;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
 .pane-head{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg);border-bottom:1px solid var(--border)}
 .pane-title{font-size:13px;color:var(--sub);font-weight:500}
+.detect-badge{display:none;margin-left:6px;font-size:11px;font-weight:400;color:var(--primary);background:var(--primary-bg);border-radius:8px;padding:1px 8px}
 .pane-tools{display:flex;gap:6px}
 .icon-btn{cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--sub);padding:3px 10px;border-radius:6px;font-size:12px}
 .icon-btn:hover{color:var(--primary);border-color:var(--primary)}
@@ -140,6 +141,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     <div class="card translate-card">
       <div class="quick-tabs">
         <span class="qt-label">快捷：</span>
+        <button class="qt" data-src="zh" data-dst="en">中 → 英</button>
         <button class="qt" data-src="en" data-dst="zh">英 → 中</button>
         <button class="qt" data-src="ja" data-dst="zh">日 → 中</button>
         <button class="qt" data-src="ko" data-dst="zh">韩 → 中</button>
@@ -159,7 +161,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       <div class="panes">
         <div class="pane-box">
           <div class="pane-head">
-            <span class="pane-title">原文</span>
+            <span class="pane-title">原文 <span class="detect-badge" id="detectBadge"></span></span>
             <span class="pane-tools">
               <button class="icon-btn" id="copySrcBtn" title="复制原文">复制</button>
               <button class="icon-btn" id="pasteBtn" title="粘贴剪贴板">粘贴</button>
@@ -447,8 +449,29 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   $('#btnStop').onclick = () => { if(abortCtrl) abortCtrl.abort(); };
   // 输入自动翻译（去抖）
   let debounce = null;
+  // 快速语言检测（中/英/日/韩），仅自动检测时显示徽标，便于快速选快捷标签
+  function detectLang(text){
+    const s = text.trim();
+    if(!s) return '';
+    if(/[\u3040-\u30ff]/.test(s)) return '日文';
+    if(/[\uac00-\ud7af]/.test(s)) return '韩文';
+    const noSpace = s.replace(/\s/g, '');
+    const han = (s.match(/[\u4e00-\u9fff]/g) || []).length;
+    const latin = (s.match(/[a-zA-Z]/g) || []).length;
+    if(han > 0 && han >= noSpace.length * 0.3) return '中文';
+    if(latin > 0 && latin >= noSpace.length * 0.5) return '英文';
+    return '其他';
+  }
+  function updateDetect(){
+    const badge = $('#detectBadge');
+    const auto = $('#srcLang').value === '';
+    const lang = auto ? detectLang(srcText.value) : '';
+    badge.textContent = lang ? '检测：' + lang : '';
+    badge.style.display = lang ? '' : 'none';
+  }
   srcText.addEventListener('input', () => {
     $('#charCount').textContent = srcText.value.length ? srcText.value.length + ' 字' : '';
+    updateDetect();
     if(!autoToggle.checked) return;
     clearTimeout(debounce);
     debounce = setTimeout(doTranslate, 700);
@@ -457,6 +480,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   $('#clearBtn').onclick = () => {
     srcText.value = ''; $('#charCount').textContent = '';
     resultText.textContent = '译文将显示在这里';
+    updateDetect();
     clearTimeout(debounce);
     srcText.focus();
   };
@@ -501,11 +525,12 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     $('#srcLang').value = b.dataset.src;
     $('#dstLang').value = b.dataset.dst;
     updateQuickActive();
+    updateDetect();
     clearTimeout(debounce);
     if(srcText.value.trim()) setTimeout(doTranslate, 200);
     else srcText.focus();
   });
-  $('#srcLang').onchange = updateQuickActive;
+  $('#srcLang').onchange = () => { updateQuickActive(); updateDetect(); };
   $('#dstLang').onchange = updateQuickActive;
 
   /* 设置 */
