@@ -512,11 +512,18 @@ func tailFile(path string, n int) []string {
 
 // handleWeb 内嵌管理界面
 func (s *Server) handleWeb(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/" {
+	switch r.URL.Path {
+	case "/":
 		content, _ := web.IndexHTML()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(content)
 		return
+	case "/favicon-16.png", "/favicon-32.png":
+		if b, ok := web.Favicon(strings.TrimPrefix(r.URL.Path, "/")); ok {
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(b)
+			return
+		}
 	}
 	http.NotFound(w, r)
 }

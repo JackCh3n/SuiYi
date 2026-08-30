@@ -53,30 +53,41 @@ func ExeDir() string {
 	return filepath.Dir(exe)
 }
 
-// Resolve 相对路径优先按「工作目录 → 可执行文件目录」查找，返回首个存在的绝对路径
+// Resolve 相对路径按「工作目录 → 可执行文件目录 → 可执行文件上级目录」查找，
+// 返回首个存在的绝对路径（未找到也返回最可能的绝对路径，便于后续报错）。
+// 兼容两种部署形态：exe 位于项目根（third_party/ 同级），或位于 build/ 子目录
+// （如 build\suiyi.exe，第三方引擎/模型在项目根）。
 func Resolve(rel string) string {
 	if rel == "" {
 		return ""
 	}
+	// 1) 工作目录
 	if abs, err := filepath.Abs(rel); err == nil {
 		if _, err := os.Stat(abs); err == nil {
 			return abs
 		}
-		if _, err := os.Stat(rel); err == nil {
-			if a, err := filepath.Abs(rel); err == nil {
-				return a
-			}
-		}
 	}
-	cand := filepath.Join(ExeDir(), rel)
-	if _, err := os.Stat(cand); err == nil {
+	// 2) 可执行文件所在目录（exe 与 third_party 同级）
+	exeDir := ExeDir()
+	if cand := filepath.Join(exeDir, rel); statOK(cand) {
 		return cand
 	}
-	// 未找到也返回可执行文件目录下的绝对路径（便于后续创建）
-	if a, err := filepath.Abs(rel); err == nil {
-		return a
+	// 3) 可执行文件的上级目录（exe 在 build/ 等子目录时，项目根在此）
+	if parent := filepath.Dir(exeDir); parent != exeDir {
+		if cand := filepath.Join(parent, rel); statOK(cand) {
+			return cand
+		}
 	}
-	return cand
+	// 4) 兜底：工作目录下的绝对路径（便于后续创建/清晰报错）
+	if abs, err := filepath.Abs(rel); err == nil {
+		return abs
+	}
+	return filepath.Join(exeDir, rel)
+}
+
+func statOK(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // DataDir 数据目录（模型/引擎不存在时的可写位置）

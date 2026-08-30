@@ -18,7 +18,20 @@ taskkill /F /IM suiyi.exe /T >nul 2>&1
 taskkill /F /IM llama-server.exe /T >nul 2>&1
 powershell -NoProfile -Command "Start-Sleep -Milliseconds 800" >nul 2>&1
 
-echo [2/3] Building build\suiyi.exe ...
+echo [2/3] Generating icon resource (winres/syso) ...
+if not exist "%USERPROFILE%\go\bin\rsrc.exe" (
+  echo   Installing rsrc tool...
+  go install github.com/akavel/rsrc@latest
+  if errorlevel 1 (
+    echo   rsrc install FAILED - icon resource skipped.
+    goto :build
+  )
+)
+"%USERPROFILE%\go\bin\rsrc.exe" -arch amd64 -ico gui\assets\appicon.ico -o rsrc_windows_amd64.syso
+if errorlevel 1 echo   rsrc FAILED - building without icon.
+
+:build
+echo [3/3] Building build\suiyi.exe ...
 if not exist build mkdir build
 go build -trimpath -ldflags "-s -w" -o build\suiyi.exe .
 if errorlevel 1 (
@@ -28,7 +41,7 @@ if errorlevel 1 (
 )
 echo Built: build\suiyi.exe
 
-echo [3/3] Starting service and opening browser...
+echo [4/4] Starting service and opening browser...
 start "SuiYi" "build\suiyi.exe" serve
 powershell -NoProfile -Command "Start-Sleep -Seconds 3" >nul 2>&1
 start "" http://127.0.0.1:8848

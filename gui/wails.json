@@ -2,6 +2,7 @@
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "suiyi-gui",
   "outputfilename": "suiyi-gui",
+  "appicon": "assets/appicon.png",
   "frontend:install": "",
   "frontend:build": "",
   "author": {
