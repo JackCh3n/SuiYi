@@ -28,6 +28,7 @@
 - **运行日志**：应用日志 + 本地引擎日志分栏展示，切页自动加载
 - **亮/暗色主题**：默认亮色，一键切换，本地记忆
 - **跨平台构建**：GitHub Actions + CNB 双 CI 自动构建 11 平台 Release
+- **桌面 GUI（Windows）**：Wails v2.12 + WebView2 原生窗口（`build-gui.bat`），内嵌完整 Web 界面
 
 ---
 
@@ -61,6 +62,13 @@ build\suiyi.exe serve        :: 默认 http://127.0.0.1:8848
 
 ```bat
 build.bat
+```
+
+方式三：桌面 GUI（Wails v2.12 + WebView2 原生窗口，Windows）
+
+```bat
+build-gui.bat          :: 构建 build\suiyi-gui.exe
+build\suiyi-gui.exe    :: 运行（窗口内加载本地 Web 界面）
 ```
 
 ### 3. 使用 Web 界面
@@ -103,7 +111,6 @@ build\suiyi.exe translate "你好世界" -t en
 | `/health` | GET | 服务与后端状态（含 `backend`、`engine`） |
 | `/translate` | POST | `{text, source?, target?, glossary?, style?}` |
 | `/translate/stream` | POST | SSE 流式翻译（增量 `delta` + 进度 `progress`/`stage`/`eta`/`tps`） |
-| `/batch` | POST | `{items:[{text,...}], target?}` 批量翻译 |
 | `/languages` | GET | 支持语言列表 |
 | `/models` | GET | `models/` 目录下的 GGUF 模型列表 |
 | `/config` | GET/PUT | 配置读写（含 `backend`/`openai_*`/`n_ctx`） |
@@ -141,13 +148,19 @@ build.bat
 ```
 suiyi/
 ├── main.go                    # 入口：服务 + API
-├── build.bat                  # Windows 本地构建脚本
+├── build.bat                  # Windows 本地构建脚本（服务版）
+├── build-gui.bat              # Windows 本地构建脚本（桌面 GUI 版）
 ├── internal/
+│   ├── appcore/               # 服务核心聚合（引擎+队列+API，CLI/GUI 共用）
 │   ├── engine/                # llama-server 子进程管理 + OpenAI 兼容客户端
 │   ├── api/                   # REST API + Web 静态资源(embed)
 │   ├── queue/                 # 翻译队列（串行）
 │   ├── config/                # 配置读写（多后端字段）
 │   └── ...
+├── gui/                       # 桌面 GUI（Wails v2.12 + WebView2）
+│   ├── main.go                #   GUI 入口（启动服务核心 + 窗口）
+│   ├── app.go                 #   Wails 绑定（版本/API 地址/打开目录）
+│   └── frontend/index.html    #   窗口首页（重定向到本地 Web 界面）
 ├── web/index.html             # Web 管理界面（Google 式左右对照翻译）
 ├── third_party/               # 各平台 llama-server（gitignore）
 ├── models/                    # GGUF 模型（gitignore）
