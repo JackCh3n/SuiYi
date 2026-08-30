@@ -22,6 +22,7 @@
 - **可选 token 鉴权**：设置 token 后 API 需鉴权，防本机程序滥用
 - **多后端**：
   - `local`（默认）：本地 llama.cpp（llama-server 子进程），完全离线
+  - `hymt`：hy-mt-rs 引擎，支持 AngelSlim 官方 **1.25bit（STQ1_0）** GGUF（440MB，省内存）
   - `openai`：任意 OpenAI 兼容 API（OpenAI / 通义 / DeepSeek / 本地自建等）
 - **模型下拉切换**：把 `.gguf` 放入 `models/` 目录，Web 设置页下拉选择并「刷新」
 - **批量翻译**：每行一条，串行处理，结果表格展示并可复制
@@ -47,8 +48,10 @@ suiyi/
 - 从 llama.cpp 官方 Release 获取 `llama-server`（Windows CPU x64），放入 `third_party/windows/amd64/`
 - 从 HuggingFace / ModelScope 下载 Hy-MT2 GGUF，放入 `models/`
 
-> **关于 STQ 模型**：`1.25bit-v2` / `2bit-v2` 等使用 AngelSlim STQ 极低比特量化，
-> **标准 llama.cpp 无法加载**（详见 [设计文档](设计文档.md) §2.3）。当前默认使用 `Q4_K_M`。
+> **关于 STQ 模型**：`1.25bit-v2` 等使用 AngelSlim STQ 极低比特量化，**标准 llama.cpp 无法正确解码**
+> （PR #22836 的 x86 内核问题）。使用 `1.25bit-v2` 时请切换 **`hymt` 后端**（hy-mt-rs 引擎，
+> 见 [设计文档](设计文档.md) §2.3）；`2bit-v2`（SEQ）当前无可用引擎（llama.cpp / hy-mt 均不支持）。
+> 默认仍使用 `Q4_K_M`。
 
 ### 2. 启动
 

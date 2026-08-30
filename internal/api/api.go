@@ -147,6 +147,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Backend == "openai" {
 		// OpenAI 兼容后端：有配置即视为可用
 		resp["engine"] = s.cfg.OpenAIBaseURL != ""
+	} else if s.cfg.Backend == "hymt" {
+		// hy-mt CLI 后端：可执行文件与模型存在即视为可用（无常驻进程）
+		_, statBin := os.Stat(config.Resolve(s.cfg.EnginePath))
+		_, statModel := os.Stat(config.Resolve(s.cfg.ModelPath))
+		resp["engine"] = statBin == nil && statModel == nil
 	} else {
 		engineOK := false
 		if s.eng != nil {

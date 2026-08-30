@@ -28,6 +28,9 @@ func Start(cfg *config.Config) (*Core, error) {
 
 	if cfg.Backend == "openai" {
 		c.Completer = engine.NewOpenAI(cfg.OpenAIBaseURL, cfg.OpenAIKey, cfg.OpenAIModel)
+	} else if cfg.Backend == "hymt" {
+		// hy-mt-rs CLI 后端：支持 AngelSlim 1.25bit（STQ1_0）官方 GGUF
+		c.Completer = engine.NewHyMT(config.Resolve(cfg.ModelPath), config.Resolve(cfg.EnginePath))
 	} else {
 		eng := engine.New(&engine.Config{
 			EnginePort: cfg.EnginePort,

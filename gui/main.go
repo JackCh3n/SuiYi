@@ -11,6 +11,8 @@ import (
 	"net/http"
 
 	"github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/menu"
+	"github.com/wailsapp/wails/v2/pkg/menu/keys"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
@@ -57,6 +59,7 @@ func main() {
 			// 首页（frontend/index.html）通过绑定 GetAPIURL 获得地址后重定向到本地 Web 界面
 			Assets: assets,
 		},
+		Menu:             buildMenu(app),
 		BackgroundColour: options.NewRGB(245, 246, 250),
 		OnStartup:        app.startup,
 		OnBeforeClose:    app.beforeClose,
@@ -70,4 +73,34 @@ func main() {
 	if err != nil {
 		log.Fatalf("GUI 启动失败: %v", err)
 	}
+}
+
+// buildMenu 原生应用菜单 + 快捷键（Wails keys）
+func buildMenu(app *App) *menu.Menu {
+	m := menu.NewMenu()
+
+	file := m.AddSubmenu("文件")
+	file.AddText("打开 Web 界面（浏览器）", keys.CmdOrCtrl("o"), func(_ *menu.CallbackData) {
+		_ = app.OpenWeb()
+	})
+	file.AddText("显示/隐藏窗口", keys.CmdOrCtrl("h"), func(_ *menu.CallbackData) {
+		app.ToggleWindow()
+	})
+	file.AddSeparator()
+	file.AddText("打开数据目录", keys.CmdOrCtrl("d"), func(_ *menu.CallbackData) {
+		_ = app.OpenDataDir()
+	})
+	file.AddText("打开模型目录", keys.CmdOrCtrl("m"), func(_ *menu.CallbackData) {
+		_ = app.OpenModelsDir()
+	})
+	file.AddSeparator()
+	file.AddText("退出", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
+		app.Quit()
+	})
+
+	help := m.AddSubmenu("帮助")
+	help.AddText("关于", nil, func(_ *menu.CallbackData) {
+		app.About()
+	})
+	return m
 }
