@@ -30,8 +30,22 @@ type Server struct {
 	logs      []string // 环形日志
 	logMax    int
 
+	switchFn func(modelPath string) (*BackendSwitch, error) // 运行时切换后端（appcore 注入）
+
 	clipMu      sync.Mutex
 	clipHistory []ClipItem // 剪贴板翻译历史（环形）
+}
+
+// BackendSwitch 描述一次运行时后端切换的结果
+type BackendSwitch struct {
+	Backend   string           // 新后端：local / hymt / openai
+	Completer engine.Completer // 新推理后端（供翻译队列使用）
+	Eng       *engine.Engine   // 本地 llama 引擎（local 后端非空）
+}
+
+// SetSwitchFn 注入模型切换回调（由 appcore 提供，实现按模型类型自动路由后端）
+func (s *Server) SetSwitchFn(fn func(modelPath string) (*BackendSwitch, error)) {
+	s.switchFn = fn
 }
 
 // ClipItem 剪贴板翻译记录
@@ -169,11 +183,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // TranslateRequest 单句翻译请求
 type TranslateRequest struct {
-	Text     string `json:"text"`
-	Source   string `json:"source,omitempty"` // 语言代码，空=自动
-	Target   string `json:"target,omitempty"` // 目标语言代码，空=配置默认
+	Text         string `json:"text"`
+	Source       string `json:"source,omitempty"`   // 语言代码，空=自动
+	Target       string `json:"target,omitempty"`   // 目标语言代码，空=配置默认
 	TermGlossary string `json:"glossary,omitempty"` // 可选：术语约定
-	Style    string `json:"style,omitempty"`  // 可选：风格
+	Style        string `json:"style,omitempty"`    // 可选：风格
 }
 
 // TranslateResult 结果
@@ -470,17 +484,22 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.addLog("配置已更新")
-		// 本地后端：模型路径变化时立即切换运行中的引擎（失败自动回退）
-		if modelChanged && s.cfg.Backend == "local" && s.eng != nil {
+		// 本地/hymt 后端：模型路径变化时按模型类型自动切换后端（失败自动回退）
+		if modelChanged && (s.cfg.Backend == "local" || s.cfg.Backend == "hymt") && s.switchFn != nil {
 			s.addLog("正在切换模型: %s", s.cfg.ModelPath)
-			if err := s.eng.SetModel(s.cfg.ModelPath); err != nil {
+			bs, err := s.switchFn(s.cfg.ModelPath)
+			if err != nil {
 				s.cfg.ModelPath = oldModel
 				_ = s.cfg.Save()
 				s.addLog("模型切换失败，已回退: %v", err)
 				writeJSON(w, 200, map[string]any{"ok": false, "error": "模型切换失败，已回退旧模型", "config": s.cfg})
 				return
 			}
-			s.addLog("模型已切换: %s", s.cfg.ModelPath)
+			s.eng = bs.Eng
+			s.completer = bs.Completer
+			s.cfg.Backend = bs.Backend
+			_ = s.cfg.Save()
+			s.addLog("模型已切换(%s): %s", bs.Backend, s.cfg.ModelPath)
 		}
 		writeJSON(w, 200, s.cfg)
 	default:

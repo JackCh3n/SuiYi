@@ -4,6 +4,8 @@ package appcore
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,8 +31,8 @@ func Start(cfg *config.Config) (*Core, error) {
 	if cfg.Backend == "openai" {
 		c.Completer = engine.NewOpenAI(cfg.OpenAIBaseURL, cfg.OpenAIKey, cfg.OpenAIModel)
 	} else if cfg.Backend == "hymt" {
-		// hy-mt-rs CLI 后端：支持 AngelSlim 1.25bit（STQ1_0）官方 GGUF
-		c.Completer = engine.NewHyMT(config.Resolve(cfg.ModelPath), config.Resolve(cfg.EnginePath))
+		// hy-mt-rs CLI 后端：支持 AngelSlim 1.25bit（STQ1_0）/ 2bit（SEQ）GGUF
+		c.Completer = engine.NewHyMT(config.Resolve(cfg.ModelPath), hyMTBinPath(cfg))
 	} else {
 		eng := engine.New(&engine.Config{
 			EnginePort: cfg.EnginePort,
@@ -76,7 +78,75 @@ func Start(cfg *config.Config) (*Core, error) {
 	})
 
 	c.Srv = api.New(cfg, c.Completer, c.Q)
+	c.Srv.SetSwitchFn(c.SwitchModel)
 	return c, nil
+}
+
+// needsHyMT 判断模型是否必须走 hy-mt 后端（AngelSlim 私有量化：2bit SEQ / 1.25bit STQ，
+// llama.cpp 无法加载 type 41/43）
+func needsHyMT(modelAbs string) bool {
+	b := strings.ToLower(filepath.Base(modelAbs))
+	return strings.Contains(b, "2bit") || strings.Contains(b, "1.25bit")
+}
+
+// hyMTBinPath 定位 hy-mt.exe：优先 third_party/windows/amd64/hymt/，其次用户配置的 engine_path
+func hyMTBinPath(cfg *config.Config) string {
+	p := config.Resolve("third_party/windows/amd64/hymt/hy-mt.exe")
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	return config.Resolve(cfg.EnginePath)
+}
+
+// llamaBinPath 定位 llama-server.exe：优先 third_party/windows/amd64/llama-server.exe
+func llamaBinPath(cfg *config.Config) string {
+	p := config.Resolve("third_party/windows/amd64/llama-server.exe")
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	return config.Resolve(cfg.EnginePath)
+}
+
+// SwitchModel 按模型类型自动切换推理后端：
+//   - 2bit / 1.25bit（AngelSlim 私有量化）→ hy-mt 后端（子进程 CLI）
+//   - 其余（Q4_K_M 等标准量化）→ 本地 llama-server 后端
+//
+// 成功返回新后端信息（供 API 层同步状态）；失败时保持原后端不变。
+func (c *Core) SwitchModel(modelPath string) (*api.BackendSwitch, error) {
+	newAbs := config.Resolve(modelPath)
+	if _, err := os.Stat(newAbs); err != nil {
+		return nil, fmt.Errorf("模型文件不存在: %s", modelPath)
+	}
+	if needsHyMT(newAbs) {
+		bin := hyMTBinPath(c.cfg)
+		if _, err := os.Stat(bin); err != nil {
+			return nil, fmt.Errorf("找不到 hy-mt 引擎: %s（请放入 third_party/windows/amd64/hymt/ 或配置 engine_path）", bin)
+		}
+		if c.Eng != nil {
+			_ = c.Eng.Stop()
+		}
+		h := engine.NewHyMT(newAbs, bin)
+		c.Eng = nil
+		c.Completer = h
+		return &api.BackendSwitch{Backend: "hymt", Completer: h}, nil
+	}
+	eng := engine.New(&engine.Config{
+		EnginePort: c.cfg.EnginePort,
+		ModelPath:  modelPath,
+		EnginePath: llamaBinPath(c.cfg),
+		SaveMemory: c.cfg.SaveMemory,
+		NGL:        c.cfg.NGL,
+		NCTX:       c.cfg.NCTX,
+	})
+	if err := eng.Start(context.Background()); err != nil {
+		return nil, fmt.Errorf("启动引擎失败: %w", err)
+	}
+	if c.Eng != nil {
+		_ = c.Eng.Stop()
+	}
+	c.Eng = eng
+	c.Completer = eng
+	return &api.BackendSwitch{Backend: "local", Completer: eng, Eng: eng}, nil
 }
 
 // Stop 停止核心：先关队列，再停本地引擎
