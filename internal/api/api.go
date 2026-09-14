@@ -168,7 +168,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		resp["engine"] = statBin == nil && statModel == nil
 	} else {
 		engineOK := false
-		if s.eng != nil {
+		// 就绪通道一旦关闭不会重开，进程被杀后仍是关闭状态：必须先确认进程还活着
+		if s.eng != nil && s.eng.Running() {
 			select {
 			case <-s.eng.Ready():
 				engineOK = true

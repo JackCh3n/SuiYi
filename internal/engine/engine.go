@@ -80,14 +80,15 @@ func (e *Engine) Start(ctx context.Context) error {
 		"--port", fmt.Sprint(e.cfg.EnginePort),
 		"-ngl", fmt.Sprint(e.cfg.NGL),
 		"-c", fmt.Sprint(nCtx), // 上下文长度：控制 KV cache 占用，长文本需加大
-		"--parallel", "1",      // 单槽位：单个请求可用满 n_ctx
-		"--jinja",              // 使用模型自带 chat template
+		"--parallel", "1", // 单槽位：单个请求可用满 n_ctx
+		"--jinja", // 使用模型自带 chat template
 	}
 	if e.cfg.SaveMemory {
 		// 省内存：减小 mmap 预取，加载更慢但更省
 		args = append(args, "--mlock", "0")
 	}
 	e.cmd = exec.Command(e.cfg.EnginePath, args...)
+	hideConsole(e.cmd) // 后台运行：不弹控制台窗口（关闭黑窗口会连带杀掉推理进程）
 
 	// 日志落盘 data/engine.log，避免控制台刷屏
 	logDir := filepath.Dir(e.logPath())
@@ -199,7 +200,10 @@ func (e *Engine) locate() error {
 func (e *Engine) waitHealthy(ctx context.Context) {
 	tick := time.NewTicker(500 * time.Millisecond)
 	defer tick.Stop()
-	deadline := time.Now().Add(120 * time.Second)
+	startupTimeout := 120 * time.Second // 就绪前：启动超时
+	stallTimeout := 120 * time.Second   // 就绪后：持续无响应的重启阈值
+	deadline := time.Now().Add(startupTimeout)
+	ready := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -218,16 +222,15 @@ func (e *Engine) waitHealthy(ctx context.Context) {
 			ok, _ := e.checkHealth()
 			if ok {
 				e.readyOnce.Do(func() { close(e.ready) }) // 并发 waitHealthy 也只关闭一次
-				return
+				if !ready {
+					ready = true
+					log.Printf("[engine] 推理引擎就绪")
+				}
+				// 就绪后转为守候：进程退出则重启，交棒给新的 waitHealthy（避免多守候者）
+				deadline = time.Now().Add(stallTimeout)
 			}
 			// 进程意外退出则重启（切换中除外）
-			exit := false
-			e.mu.Lock()
-			if e.started && e.cmd != nil && e.cmd.ProcessState != nil && e.cmd.ProcessState.Exited() {
-				exit = true
-			}
-			e.mu.Unlock()
-			if exit {
+			if e.processExited() {
 				if switching {
 					return // 切换中由 SetModel 负责处理
 				}
@@ -236,6 +239,23 @@ func (e *Engine) waitHealthy(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// processExited 引擎子进程是否已退出（就绪后进程被杀时用于纠正状态并触发重启）
+func (e *Engine) processExited() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.started && e.cmd != nil && e.cmd.ProcessState != nil && e.cmd.ProcessState.Exited()
+}
+
+// Running 引擎子进程是否仍在运行；就绪后进程意外退出时，健康检查据此返回不可用
+func (e *Engine) Running() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cmd == nil || e.cmd.Process == nil {
+		return false
+	}
+	return e.cmd.ProcessState == nil || !e.cmd.ProcessState.Exited()
 }
 
 // Ready 返回就绪通知
@@ -349,8 +369,8 @@ func (e *Engine) restart(reason string) {
 
 // ChatRequest OpenAI 兼容请求体
 type ChatRequest struct {
-	Model       string `json:"model"`
-	Messages    []Msg  `json:"messages"`
+	Model       string  `json:"model"`
+	Messages    []Msg   `json:"messages"`
 	Temperature float64 `json:"temperature,omitempty"`
 	TopP        float64 `json:"top_p,omitempty"`
 	TopK        int     `json:"top_k,omitempty"`

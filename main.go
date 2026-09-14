@@ -151,6 +151,13 @@ func run(o appOptions) int {
 
 	webURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.APIPort)
 	fmt.Printf("随译 SuiYi v%s · 推理后端 %s · 模型 %s\n", version, cfg.Backend, config.Resolve(cfg.ModelPath))
+
+	// 启动前清理：结束已在运行的旧实例与推理进程（llama-server / hy-mt），释放 API / 引擎端口
+	if killed := killExisting(cfg); len(killed) > 0 {
+		fmt.Printf("已结束既有进程: %s\n", strings.Join(killed, "、"))
+		time.Sleep(700 * time.Millisecond) // 等端口释放
+	}
+
 	fmt.Printf("管理界面: %s/  窗口: %v  托盘: %v\n", webURL, o.window, o.tray)
 
 	core, err := appcore.Start(cfg)
@@ -167,11 +174,12 @@ func run(o appOptions) int {
 		}
 	}()
 
-	// 端口被占用 → 已有实例在运行，直接打开既有界面（避免多开抢占端口）
+	// 端口被占用（非本程序占用时无法清理）：打开既有界面，避免多开抢占端口
 	select {
 	case err := <-serveErr:
 		if isAddrInUse(err) {
-			fmt.Printf("检测到已有实例在运行，直接打开 %s\n", webURL)
+			fmt.Printf("端口 %d 已被占用（PID %v），直接打开 %s\n",
+				cfg.APIPort, listeningPIDs(cfg.APIPort), webURL)
 			_ = openBrowser(webURL)
 			return 0
 		}

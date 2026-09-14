@@ -59,6 +59,7 @@ func (h *HyMT) Complete(ctx context.Context, r ChatRequest) (string, error) {
 
 	var out, errBuf bytes.Buffer
 	cmd := exec.CommandContext(ctx, h.BinPath, args...)
+	hideConsole(cmd) // 后台运行：每次推理都不弹控制台窗口
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
