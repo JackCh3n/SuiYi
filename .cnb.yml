@@ -57,9 +57,9 @@ main:
             CGO_ENABLED=0 GOOS=linux   GOARCH=386     go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-386 .
             CGO_ENABLED=0 GOOS=linux   GOARCH=loong64 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-loong64 .
             CGO_ENABLED=0 GOOS=linux   GOARCH=riscv64 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-riscv64 .
-            CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-amd64.exe .
-            CGO_ENABLED=0 GOOS=windows GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-arm64.exe .
-            CGO_ENABLED=0 GOOS=windows GOARCH=386     go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-386.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -tags production -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-amd64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=arm64   go build -tags production -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-arm64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=386     go build -tags production -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-386.exe .
             CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-darwin-amd64 .
             CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-darwin-arm64 .
             ls -lh dist/
@@ -94,8 +94,9 @@ main:
             > 运行时还需要对应平台的 llama-server（llama.cpp）与 GGUF 模型。
 
             ```bash
-            # Windows（先放入 llama-server.exe 与模型）
-            suiyi-windows-amd64.exe serve
+            # Windows（先放入 llama-server.exe 与模型）：默认开启桌面窗口 + 本地服务
+            suiyi-windows-amd64.exe
+            # 需要查看控制台日志时加 -debug；纯服务（无窗口）用 serve
 
             # Linux/macOS（先赋予执行权限）
             chmod +x suiyi-linux-amd64
@@ -161,9 +162,9 @@ main:
             CGO_ENABLED=0 GOOS=linux   GOARCH=386     go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-386 .
             CGO_ENABLED=0 GOOS=linux   GOARCH=loong64 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-loong64 .
             CGO_ENABLED=0 GOOS=linux   GOARCH=riscv64 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-riscv64 .
-            CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-amd64.exe .
-            CGO_ENABLED=0 GOOS=windows GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-arm64.exe .
-            CGO_ENABLED=0 GOOS=windows GOARCH=386     go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-386.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -tags production -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-amd64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=arm64   go build -tags production -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-arm64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=386     go build -tags production -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-386.exe .
             CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-darwin-amd64 .
             CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-darwin-arm64 .
             ls -lh dist/
@@ -196,8 +197,9 @@ main:
             > 运行时还需要对应平台的 llama-server（llama.cpp）与 GGUF 模型。
 
             ```bash
-            # Windows（先放入 llama-server.exe 与模型）
-            suiyi-windows-amd64.exe serve
+            # Windows（先放入 llama-server.exe 与模型）：默认开启桌面窗口 + 本地服务
+            suiyi-windows-amd64.exe
+            # 需要查看控制台日志时加 -debug；纯服务（无窗口）用 serve
 
             # Linux/macOS（先赋予执行权限）
             chmod +x suiyi-linux-amd64
@@ -258,9 +260,9 @@ main:
             CGO_ENABLED=0 GOOS=linux   GOARCH=386     go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-386 .
             CGO_ENABLED=0 GOOS=linux   GOARCH=loong64 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-loong64 .
             CGO_ENABLED=0 GOOS=linux   GOARCH=riscv64 go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-linux-riscv64 .
-            CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-amd64.exe .
-            CGO_ENABLED=0 GOOS=windows GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-arm64.exe .
-            CGO_ENABLED=0 GOOS=windows GOARCH=386     go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-386.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=amd64   go build -tags production -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-amd64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=arm64   go build -tags production -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-arm64.exe .
+            CGO_ENABLED=0 GOOS=windows GOARCH=386     go build -tags production -trimpath -ldflags "-s -w -H=windowsgui -X main.version=$RELEASE_VERSION" -o dist/suiyi-windows-386.exe .
             CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-darwin-amd64 .
             CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64   go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/suiyi-darwin-arm64 .
             ls -lh dist/
@@ -293,8 +295,9 @@ main:
             > 运行时还需要对应平台的 llama-server（llama.cpp）与 GGUF 模型。
 
             ```bash
-            # Windows（先放入 llama-server.exe 与模型）
-            suiyi-windows-amd64.exe serve
+            # Windows（先放入 llama-server.exe 与模型）：默认开启桌面窗口 + 本地服务
+            suiyi-windows-amd64.exe
+            # 需要查看控制台日志时加 -debug；纯服务（无窗口）用 serve
 
             # Linux/macOS（先赋予执行权限）
             chmod +x suiyi-linux-amd64

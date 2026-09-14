@@ -1,22 +1,34 @@
-// 随译 SuiYi：本地翻译服务入口
+// 随译 SuiYi：桌面 GUI + 本地服务（同一可执行文件）
 //
 // 用法：
 //
-//	suiyi serve               启动 Web 管理界面 + API（默认 127.0.0.1:8848）
-//	suiyi translate "文本"     单次翻译，需服务已在运行（走本地 API）
+//	suiyi                    桌面窗口（内嵌 Web 管理界面）+ API/Web 服务（默认 127.0.0.1:8848）
+//	suiyi -debug             同上，并附带控制台窗口（查看日志）
+//	suiyi serve              无窗口服务（保留托盘），适合脚本 / 开机自启
+//	suiyi serve -headless    纯服务（无窗口、无托盘），适合服务器
+//	suiyi translate "文本"    调用本地服务单次翻译
+//
+// 控制台窗口：默认不显示黑窗口（Windows 构建加 -H=windowsgui 隐藏子系统），
+// 传 -debug 时用 AllocConsole 动态分配控制台并接管 stdout/stderr。
+//
+// 窗口与浏览器共用同一地址：窗口首页重定向到 http://127.0.0.1:<port>/，
+// 任意浏览器也可直接打开该地址。
 package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -29,112 +41,273 @@ import (
 	"suiyi/internal/tray"
 )
 
+// trayIcon 托盘图标（应用图标 .ico，Windows 托盘用）
+//
+//go:embed assets/appicon.ico
+var trayIcon []byte
+
 // version 构建版本号，由 CI 通过 -ldflags "-X main.version=..." 注入
 var version = "dev"
 
+// consoleVisible -debug 是否已接管控制台（Windows，用于决定错误是否弹窗）
+var consoleVisible bool
+
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "translate" {
-		os.Exit(runTranslate(os.Args[2:]))
+	args := os.Args[1:]
+	if hasFlag(args, "debug") {
+		attachConsole()
 	}
-	os.Exit(runServe(os.Args[1:]))
+	if len(args) > 0 {
+		switch args[0] {
+		case "translate":
+			os.Exit(runTranslate(args[1:]))
+		case "serve":
+			os.Exit(runServe(args[1:]))
+		}
+	}
+	os.Exit(runDesktop(args))
 }
 
-// runServe 常驻服务
+// hasFlag 判断参数里是否出现 -xxx / --xxx（兼容 -xxx=true）
+func hasFlag(args []string, name string) bool {
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			continue
+		}
+		if key, _, _ := strings.Cut(strings.TrimLeft(a, "-"), "="); key == name {
+			return true
+		}
+	}
+	return false
+}
+
+// appOptions 运行形态：窗口 / 托盘由各入口决定
+type appOptions struct {
+	port, ngl int
+	window    bool // 显示桌面窗口
+	tray      bool // 显示系统托盘
+	debug     bool // -debug（控制台已接管）
+}
+
+// windowOptions 传给平台相关窗口实现的参数
+type windowOptions struct {
+	apiURL      string
+	version     string
+	hideOnClose bool
+	debug       bool
+	quit        <-chan struct{}
+	show        <-chan struct{}
+}
+
+// runDesktop 默认入口：桌面窗口 + API/Web 服务（浏览器同样可访问）
+func runDesktop(args []string) int {
+	fs := flag.NewFlagSet("suiyi", flag.ExitOnError)
+	port := fs.Int("port", 0, "Web/API 端口（覆盖配置）")
+	ngl := fs.Int("ngl", 0, "GPU 层数（0=纯 CPU，Vulkan 版可调 99）")
+	noWindow := fs.Bool("headless", false, "不显示桌面窗口（仅服务 + 托盘）")
+	noTray := fs.Bool("notray", false, "不显示系统托盘")
+	_ = fs.Bool("debug", false, "显示控制台窗口（查看日志）")
+	_ = fs.Parse(args)
+
+	return run(appOptions{
+		port:   *port,
+		ngl:    *ngl,
+		window: uiSupported() && !*noWindow,
+		tray:   !*noTray,
+		debug:  hasFlag(args, "debug"),
+	})
+}
+
+// runServe 无窗口服务（保留托盘，除非 -headless）
 func runServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	port := fs.Int("port", 0, "Web/API 端口（覆盖配置）")
 	ngl := fs.Int("ngl", 0, "GPU 层数（0=纯 CPU，Vulkan 版可调 99）")
 	headless := fs.Bool("headless", false, "无托盘模式")
+	_ = fs.Bool("debug", false, "显示控制台窗口（查看日志）")
 	_ = fs.Parse(args)
 
+	return run(appOptions{
+		port:  *port,
+		ngl:   *ngl,
+		tray:  !*headless,
+		debug: hasFlag(args, "debug"),
+	})
+}
+
+// run 启动核心（推理后端 + 翻译队列 + API/Web）+ 托盘 + 窗口，阻塞至退出
+func run(o appOptions) int {
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "读取配置失败:", err)
-		return 1
+		return fail(o, "读取配置失败: %v", err)
 	}
-	if *port != 0 {
-		cfg.APIPort = *port
+	if o.port != 0 {
+		cfg.APIPort = o.port
 	}
-	if *ngl != 0 {
-		cfg.NGL = *ngl
+	if o.ngl != 0 {
+		cfg.NGL = o.ngl
 	}
-	cfg.Headless = *headless
+	cfg.Headless = !o.tray
 
+	webURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.APIPort)
 	fmt.Printf("随译 SuiYi v%s · 推理后端 %s · 模型 %s\n", version, cfg.Backend, config.Resolve(cfg.ModelPath))
+	fmt.Printf("管理界面: %s/  窗口: %v  托盘: %v\n", webURL, o.window, o.tray)
 
-	// 启动核心：推理后端 + 翻译队列 + API 服务
 	core, err := appcore.Start(cfg)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return fail(o, "%v", err)
 	}
 	defer core.Stop()
 
+	// HTTP 服务：窗口与浏览器共用同一地址
+	serveErr := make(chan error, 1)
 	go func() {
 		if err := core.Srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Fprintln(os.Stderr, "HTTP 服务错误:", err)
+			serveErr <- err
 		}
 	}()
 
+	// 端口被占用 → 已有实例在运行，直接打开既有界面（避免多开抢占端口）
+	select {
+	case err := <-serveErr:
+		if isAddrInUse(err) {
+			fmt.Printf("检测到已有实例在运行，直接打开 %s\n", webURL)
+			_ = openBrowser(webURL)
+			return 0
+		}
+		return fail(o, "HTTP 服务启动失败: %v", err)
+	case <-time.After(800 * time.Millisecond):
+	}
+
 	// 开机自启：按配置应用（Windows 注册表 Run 键）
-	if exe, err := os.Executable(); err == nil {
-		if cfg.Autostart {
-			if err := autostart.Enable(exe); err != nil {
-				core.Srv.Log("设置开机自启失败: %v", err)
-			} else {
-				core.Srv.Log("开机自启已启用")
-			}
-		} else {
-			_ = autostart.Disable()
+	applyAutostart(core, cfg)
+
+	// 剪贴板自动翻译：复制即译（去抖/过滤由 clipboard 包处理）
+	if cfg.ClipboardEnabled && o.tray {
+		clipCtx, clipCancel := context.WithCancel(context.Background())
+		defer clipCancel()
+		startClipboard(clipCtx, core, cfg)
+	}
+
+	// 退出协调：托盘「退出」/ 窗口关闭 / Ctrl+C
+	var quitOnce sync.Once
+	quit := make(chan struct{})
+	requestQuit := func() { quitOnce.Do(func() { close(quit) }) }
+
+	// 系统托盘：显示主窗口 / 打开浏览器 / 退出
+	show := make(chan struct{}, 1)
+	trayReady := make(chan struct{})
+	if o.tray {
+		go tray.Run(tray.Options{
+			Icon:    trayIcon,
+			Tooltip: "随译 SuiYi · 本地翻译服务",
+			OnReady: func() { close(trayReady) },
+			OnShow: func() {
+				select {
+				case show <- struct{}{}:
+				default:
+				}
+			},
+			OnOpen: func() { _ = openBrowser(webURL) },
+			OnQuit: requestQuit,
+		})
+	}
+
+	// 托盘就绪才启用「关闭窗口 → 隐藏到托盘」，否则关闭窗口直接退出（避免无处可点）
+	hideOnClose := false
+	if o.window && o.tray {
+		select {
+		case <-trayReady:
+			hideOnClose = true
+			fmt.Println("关闭窗口将隐藏到托盘，右键托盘图标可退出")
+		case <-time.After(2 * time.Second):
+			fmt.Println("托盘初始化超时，关闭窗口将直接退出")
 		}
 	}
 
-	// 剪贴板自动翻译：复制即译（去抖/过滤由 clipboard 包处理）
-	if cfg.ClipboardEnabled && !cfg.Headless {
-		clipCtx, clipCancel := context.WithCancel(context.Background())
-		defer clipCancel()
-		core.Srv.Log("剪贴板自动翻译已启用（复制即译）")
-		go func() {
-			clipboard.Watch(clipCtx, func(text string) {
-				core.Srv.Log("剪贴板捕获: %s", truncateRunes(text, 40))
-				done := core.Q.Submit(&queue.Job{Type: "translate", Args: &api.TranslateRequest{Text: text, Target: cfg.TargetLang}})
-				item := api.ClipItem{Time: time.Now().Format("15:04:05"), Text: truncateRunes(text, 60)}
-				switch res := (<-done).(type) {
-				case *api.TranslateResult:
-					if res.Ok {
-						item.Result = res.Text
-					} else {
-						item.Error = res.Error
-					}
-				case error:
-					item.Error = res.Error()
-				}
-				core.Srv.PushClipItem(item)
-			})
-		}()
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() { <-sig; requestQuit() }()
+
+	if o.window {
+		if err := runWindow(windowOptions{
+			apiURL:      webURL + "/",
+			version:     version,
+			hideOnClose: hideOnClose,
+			debug:       o.debug,
+			quit:        quit,
+			show:        show,
+		}); err != nil {
+			return fail(o, "%v", err)
+		}
+	} else {
+		<-quit
 	}
 
-	// 系统托盘（非 headless 时）：打开界面 / 退出
-	quitCh := make(chan struct{})
-	if !cfg.Headless {
-		webURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.APIPort)
-		go tray.Run(func() { _ = openBrowser(webURL) }, func() { close(quitCh) })
-	}
-
-	// 等待退出信号（Ctrl+C / 托盘退出）
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-	select {
-	case <-ch:
-	case <-quitCh:
-	}
-	fmt.Println("\n正在退出…")
+	fmt.Println("正在退出…")
 	return 0
 }
 
-// openBrowser 打开默认浏览器（Windows）
-func openBrowser(url string) error {
-	return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+// applyAutostart 按配置应用开机自启（Windows 注册表 Run 键）
+func applyAutostart(core *appcore.Core, cfg *config.Config) {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if !cfg.Autostart {
+		_ = autostart.Disable()
+		return
+	}
+	if err := autostart.Enable(exe); err != nil {
+		core.Srv.Log("设置开机自启失败: %v", err)
+		return
+	}
+	core.Srv.Log("开机自启已启用")
+}
+
+// startClipboard 剪贴板自动翻译：复制即译
+func startClipboard(ctx context.Context, core *appcore.Core, cfg *config.Config) {
+	core.Srv.Log("剪贴板自动翻译已启用（复制即译）")
+	go func() {
+		clipboard.Watch(ctx, func(text string) {
+			core.Srv.Log("剪贴板捕获: %s", truncateRunes(text, 40))
+			done := core.Q.Submit(&queue.Job{Type: "translate", Args: &api.TranslateRequest{Text: text, Target: cfg.TargetLang}})
+			item := api.ClipItem{Time: time.Now().Format("15:04:05"), Text: truncateRunes(text, 60)}
+			switch res := (<-done).(type) {
+			case *api.TranslateResult:
+				if res.Ok {
+					item.Result = res.Text
+				} else {
+					item.Error = res.Error
+				}
+			case error:
+				item.Error = res.Error()
+			}
+			core.Srv.PushClipItem(item)
+		})
+	}()
+}
+
+// isAddrInUse 判断监听失败是否因端口被占用（Windows 的报错文案与 Unix 不同）
+func isAddrInUse(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "address already in use") ||
+		strings.Contains(msg, "only one usage of each socket address")
+}
+
+// fail 输出错误；无可见控制台时弹窗提示（否则 GUI 用户看不到任何信息）
+func fail(o appOptions, format string, args ...any) int {
+	msg := fmt.Sprintf(format, args...)
+	fmt.Fprintln(os.Stderr, msg)
+	log.Println(msg)
+	reportFatal(msg)
+	return 1
 }
 
 // truncateRunes 按字符截断（避免截断多字节字符）
@@ -166,7 +339,7 @@ func runTranslate(args []string) int {
 	body, _ := json.Marshal(map[string]string{"text": text, "target": target})
 	resp, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d/translate", port), "application/json", strings.NewReader(string(body)))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "服务未运行，请先启动 suiyi serve：", err)
+		fmt.Fprintln(os.Stderr, "服务未运行，请先启动 suiyi：", err)
 		return 1
 	}
 	defer resp.Body.Close()

@@ -29,7 +29,9 @@
 - **运行日志**：应用日志 + 本地引擎日志分栏展示，切页自动加载
 - **亮/暗色主题**：默认亮色，一键切换，本地记忆
 - **跨平台构建**：GitHub Actions + CNB 双 CI 自动构建 11 平台 Release
-- **桌面 GUI（Windows）**：Wails v2.12 + WebView2 原生窗口（`build-gui.bat`），内嵌完整 Web 界面
+- **桌面 GUI 与服务合一（Windows）**：单个 `suiyi.exe` 默认打开 Wails v2.12 + WebView2 原生窗口（内嵌完整 Web 界面），
+  同时监听 `127.0.0.1:8848`，任意浏览器可直接访问；默认**不显示控制台黑窗口**，加 `-debug` 才弹调试控制台；
+  系统托盘菜单提供**显示主窗口 / 打开浏览器 / 退出**，关闭窗口自动隐藏到托盘继续后台服务
 
 ---
 
@@ -55,24 +57,33 @@ suiyi/
 
 ### 2. 启动
 
-方式一：直接运行
+方式一：双击运行（桌面窗口 + 本地服务，无控制台黑窗口）
 
 ```bat
-build\suiyi.exe serve        :: 默认 http://127.0.0.1:8848
+build\suiyi.exe              :: 打开窗口，同时提供 http://127.0.0.1:8848
+build\suiyi.exe -debug       :: 同上，额外弹出控制台窗口（看日志 / 排查启动失败）
 ```
 
-方式二：本地构建脚本（杀进程 → 构建 → 启动并打开浏览器）
+方式二：本地构建脚本（杀进程 → 构建 → 启动 GUI）
 
 ```bat
-build.bat
+build.bat                    :: 构建 build\suiyi.exe 并启动（无控制台）
+build.bat debug              :: 构建并带控制台启动（-debug）
 ```
 
-方式三：桌面 GUI（Wails v2.12 + WebView2 原生窗口，Windows）
+方式三：纯服务模式（无窗口，适合脚本 / 开机自启 / 服务器）
 
 ```bat
-build-gui.bat          :: 构建 build\suiyi-gui.exe
-build\suiyi-gui.exe    :: 运行（窗口内加载本地 Web 界面）
+build\suiyi.exe serve              :: 托盘 + API/Web，无桌面窗口
+build\suiyi.exe serve -headless    :: 无窗口、无托盘（Linux/macOS 服务器常用）
 ```
+
+> 关于控制台：Windows 版以 GUI 子系统构建（`-H=windowsgui`），默认不出现黑窗口；
+> 需要日志时加 `-debug`，程序会动态分配控制台并把 stdout / 日志接进去。
+> 启动失败且无控制台时，会弹出错误对话框（避免双击后毫无反馈）。
+
+> 窗口关闭行为：托盘可用时，点窗口 ✕ 会**隐藏到托盘**（服务与翻译接口继续运行），
+> 需真正退出请用托盘菜单「退出」或窗口菜单「文件 → 退出」。
 
 ### 3. 使用 Web 界面
 
@@ -127,10 +138,13 @@ build\suiyi.exe translate "你好世界" -t en
 ### 本地构建
 
 ```bat
-build.bat
+build.bat          :: 构建 build\suiyi.exe 并启动桌面窗口
+build.bat debug    :: 构建并带 -debug 控制台启动
 ```
 
-脚本流程：`终止 suiyi/llama-server 进程 → go build → 启动服务 → 打开浏览器`。
+脚本流程：`终止 suiyi/llama-server 进程 → 生成图标资源 → go build → 启动应用`。
+构建使用 `-tags production`（Wails 必须，否则走 dev 模式找不到前端）与
+`-ldflags "-s -w -H=windowsgui"`（隐藏控制台，日志改由 `-debug` 按需分配）。
 产物输出到 `build\suiyi.exe`，运行数据（配置/日志）在 `build\data\`。
 
 ### CI 自动构建
@@ -150,20 +164,24 @@ build.bat
 
 ```
 suiyi/
-├── main.go                    # 入口：服务 + API
-├── build.bat                  # Windows 本地构建脚本（服务版）
-├── build-gui.bat              # Windows 本地构建脚本（桌面 GUI 版）
+├── main.go                    # 统一入口：GUI + 服务（serve / translate 子命令）
+├── console_windows.go         # -debug 时分配控制台；无控制台时错误弹窗
+├── browser_windows.go         # 调默认浏览器打开管理界面
+├── ui_windows.go              # 平台分支：Windows 走桌面窗口，其他平台走服务模式
+├── build.bat                  # Windows 本地构建脚本（构建 + 启动，支持 debug）
 ├── internal/
-│   ├── appcore/               # 服务核心聚合（引擎+队列+API，CLI/GUI 共用）
+│   ├── appcore/               # 服务核心聚合（引擎+队列+API，各入口共用）
+│   ├── gui/                   # 桌面窗口（Wails v2.12 + WebView2，仅 Windows）
+│   │   ├── gui_windows.go     #   窗口配置、原生菜单、前端 embed
+│   │   ├── app_windows.go     #   Wails 绑定（版本/API 地址/显示隐藏/打开目录）
+│   │   └── frontend/index.html #  窗口首页（重定向到本地 Web 界面）
+│   ├── tray/                  # 系统托盘（显示主窗口/打开浏览器/退出）
 │   ├── engine/                # llama-server 子进程管理 + OpenAI 兼容客户端
 │   ├── api/                   # REST API + Web 静态资源(embed)
 │   ├── queue/                 # 翻译队列（串行）
 │   ├── config/                # 配置读写（多后端字段）
 │   └── ...
-├── gui/                       # 桌面 GUI（Wails v2.12 + WebView2）
-│   ├── main.go                #   GUI 入口（启动服务核心 + 窗口）
-│   ├── app.go                 #   Wails 绑定（版本/API 地址/打开目录）
-│   └── frontend/index.html    #   窗口首页（重定向到本地 Web 界面）
+├── assets/appicon.ico         # 应用图标（构建时用 rsrc 嵌入 exe / 托盘）
 ├── web/index.html             # Web 管理界面（Google 式左右对照翻译）
 ├── third_party/               # 各平台 llama-server（gitignore）
 ├── models/                    # GGUF 模型（gitignore）

@@ -110,7 +110,16 @@ jobs:
         shell: bash
         run: |
           OUTPUT="suiyi-${{ matrix.target }}${{ matrix.ext }}"
-          go build -trimpath -ldflags "-s -w -X main.version=${{ steps.timestamp.outputs.value }}" -o "$OUTPUT" .
+          TAGS=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            # Windows: Wails 需要 production 标签使用内嵌前端；
+            # -H=windowsgui 隐藏控制台（运行时加 -debug 可动态分配）
+            TAGS="-tags production"
+            LDFLAGS="-s -w -H=windowsgui -X main.version=${{ steps.timestamp.outputs.value }}"
+          else
+            LDFLAGS="-s -w -X main.version=${{ steps.timestamp.outputs.value }}"
+          fi
+          go build $TAGS -trimpath -ldflags "$LDFLAGS" -o "$OUTPUT" .
           echo "Built: $OUTPUT"
           ls -lh "$OUTPUT" || dir "$OUTPUT"
 
@@ -193,8 +202,9 @@ jobs:
             > 见设计文档 §5 平台能力矩阵与 third_party/ 目录说明。
 
             ```bash
-            # Windows（先放入 llama-server.exe 与模型）
-            suiyi-windows-amd64.exe serve
+            # Windows（先放入 llama-server.exe 与模型）：默认开启桌面窗口 + 本地服务
+            suiyi-windows-amd64.exe
+            # 需要查看控制台日志时加 -debug；纯服务（无窗口）用 serve
             # 打开 http://127.0.0.1:8848
 
             # Linux/macOS（先赋予执行权限）
