@@ -136,9 +136,9 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
 
 <div class="wrap">
   <nav class="tabs">
-    <div class="tab active" data-pane="p-translate" title="翻译（PageUp/PageDown 切换页签，Home/End 跳首尾页）">翻译</div>
-    <div class="tab" data-pane="p-config" title="设置（PageUp/PageDown 切换页签）">设置</div>
-    <div class="tab" data-pane="p-logs" title="日志（PageUp/PageDown 切换页签）">日志</div>
+    <div class="tab active" data-pane="p-translate" title="翻译（长文本时 Home/End 到头/尾，PageUp/PageDown 上一页/下一页）">翻译</div>
+    <div class="tab" data-pane="p-config">设置</div>
+    <div class="tab" data-pane="p-logs">日志</div>
   </nav>
 
   <!-- 翻译（Google 式左右对照） -->
@@ -264,14 +264,6 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       <div class="set-row">
         <div class="set-left"><h4>GPU 层数（ngl）</h4><p>0=纯 CPU；Vulkan 版设 99 全量 GPU 加速（Radeon 780M 等），改后重启生效</p></div>
         <input type="text" id="cfgNgl" style="width:120px" inputmode="numeric">
-      </div>
-      <div class="set-row">
-        <div class="set-left"><h4>分享图床上传地址</h4><p>「分享截图」把原文+译文图片 POST 到这里（默认本机 qiniu-upload 图床），返回的链接自动复制到剪贴板</p></div>
-        <input type="text" class="set-input" id="cfgShareURL" placeholder="http://127.0.0.1:9009/api/upload">
-      </div>
-      <div class="set-row">
-        <div class="set-left"><h4>分享图片目录</h4><p>图床中的存放目录名（qiniu-upload 的 dir 参数）</p></div>
-        <input type="text" id="cfgShareDir" style="width:160px" placeholder="suiyi">
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
         <button class="btn ghost" id="btnReset">恢复默认</button>
@@ -626,10 +618,6 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       $('#cfgPort').value = d.api_port || 8848;
       $('#cfgNctx').value = d.n_ctx || 8192;
       $('#cfgNgl').value = d.ngl || 0;
-      $('#cfgShareURL').value = d.share_upload_url || '';
-      $('#cfgShareDir').value = d.share_dir || 'suiyi';
-      shareCfg.url = d.share_upload_url || shareCfg.url;
-      shareCfg.dir = d.share_dir || shareCfg.dir;
       $('#cfgBackend').value = d.backend || 'local';
       $('#cfgOpenAIBase').value = d.openai_base_url || '';
       $('#cfgOpenAIKey').value = d.openai_key || '';
@@ -647,8 +635,6 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     $('#cfgPort').value = 8848;
     $('#cfgNctx').value = 8192;
     $('#cfgNgl').value = 0;
-    $('#cfgShareURL').value = 'http://127.0.0.1:9009/api/upload';
-    $('#cfgShareDir').value = 'suiyi';
     $('#cfgBackend').value = 'local';
     $('#cfgOpenAIBase').value = 'https://api.openai.com/v1';
     $('#cfgOpenAIKey').value = '';
@@ -673,16 +659,12 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           openai_base_url: $('#cfgOpenAIBase').value.trim(),
           openai_key: $('#cfgOpenAIKey').value.trim(),
           openai_model: $('#cfgOpenAIModel').value.trim(),
-          share_upload_url: $('#cfgShareURL').value.trim(),
-          share_dir: $('#cfgShareDir').value.trim()
         })});
       const d = await r.json();
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
       if(d && d.ok === false) throw new Error(d.error || '保存失败');
-      // 保存后立即同步翻译页默认语言与分享图床配置
+      // 保存后立即同步翻译页默认语言
       $('#dstLang').value = $('#cfgTarget').value;
-      shareCfg.url = $('#cfgShareURL').value.trim() || shareCfg.url;
-      shareCfg.dir = $('#cfgShareDir').value.trim();
       toast('设置已保存' + ($('#cfgBackend').value !== backend ? '（重启后生效）' : ''));
     }catch(e){
       toast('保存失败：' + e.message);
@@ -703,8 +685,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   }
   $('#btnRefreshLogs').onclick = loadLogs;
 
-  /* 分享截图：把「原文 + 译文」画成一张卡片图片 → 上传图床 → 链接复制到剪贴板 */
-  const shareCfg = { url: 'http://127.0.0.1:9009/api/upload', dir: 'suiyi' };
+  /* 分享截图：把「原文 + 译文」画成一张卡片图片 → 复制到剪贴板（不外传、不落盘） */
   const SHARE_FONT = '-apple-system,"Segoe UI","Microsoft YaHei",sans-serif';
   const langLabel = sel => {
     const o = sel && sel.selectedOptions && sel.selectedOptions[0];
@@ -764,23 +745,17 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
 
     return new Promise(res => cv.toBlob(res, 'image/png'));
   }
-  async function copyTextToClip(t){
-    try{ await navigator.clipboard.writeText(t); return true; }catch(e){ return false; }
-  }
   async function copyPNGToClip(blob){
     if(!window.ClipboardItem || !navigator.clipboard || !navigator.clipboard.write) return false;
     try{ await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]); return true; }
     catch(e){ return false; }
   }
-  async function uploadShareImage(blob){
-    const base = (shareCfg.url || '').trim() || 'http://127.0.0.1:9009/api/upload';
-    const url = shareCfg.dir ? base + (base.includes('?') ? '&' : '?') + 'dir=' + encodeURIComponent(shareCfg.dir) : base;
-    const fd = new FormData();
-    fd.append('file', blob, 'suiyi-' + Date.now() + '.png');
-    const r = await fetch(url, { method: 'POST', body: fd });
-    const d = await r.json().catch(() => null);
-    if(d && d.code === 0 && d.data && d.data.url) return d.data.url;
-    throw new Error((d && d.error) || ('HTTP ' + r.status));
+  function downloadPNG(blob){
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'suiyi-share-' + Date.now() + '.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
   $('#shareShotBtn').onclick = async () => {
     const src = srcText.value.trim();
@@ -792,13 +767,11 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     try{
       const blob = await drawShareCard(src, langLabel($('#srcLang')), dst, langLabel($('#dstLang')));
       if(!blob) throw new Error('canvas 导出失败');
-      const imgCopied = await copyPNGToClip(blob);   // 顺手放进剪贴板：上传失败也能直接用
-      try{
-        const link = await uploadShareImage(blob);
-        const ok = await copyTextToClip(link);
-        toast(ok ? '已上传并复制链接：' + link : '已上传：' + link);
-      }catch(err){
-        toast('图床不可用（' + err.message + '）' + (imgCopied ? '，截图已复制到剪贴板，可直接粘贴' : '，且浏览器不允许写图片剪贴板'));
+      if(await copyPNGToClip(blob)){
+        toast('已生成分享图并复制到剪贴板，直接粘贴即可分享');
+      }else{
+        downloadPNG(blob);
+        toast('浏览器不允许写图片剪贴板，已改为保存 PNG 文件');
       }
     }catch(e){
       toast('分享截图失败：' + e.message);
@@ -816,31 +789,26 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     if(t.dataset.pane === 'p-logs') loadLogs(); // 切到日志页自动加载
   });
 
-  /* 键盘监控：Home/End → 首个/最后一个页签；PageUp/PageDown → 上一个/下一个页签。
-     焦点在输入控件内时完全不拦截（保留文本的 Home/End 光标行为与文本域滚动），
-     带 Ctrl/Alt/Shift 修饰键时也放行，避免抢掉浏览器/系统的既有快捷键。 */
-  const isEditable = el => {
-    const tag = ((el && el.tagName) || '').toLowerCase();
-    return tag === 'input' || tag === 'textarea' || tag === 'select' || !!(el && el.isContentEditable);
-  };
+  /* 长文阅读翻页：Home/End 跳到内容头/尾，PageUp/PageDown 上一页/下一页。
+     只在页面确实可滚动（长文本翻译把页面撑高）时接管；没有长内容时完全放行，保留原生行为。
+     焦点在原文框里也一样接管——长文时读译文比在框内移动光标更常用；
+     想要在文本内跳光标用 Ctrl+Home / Ctrl+End（带修饰键一律放行）。 */
   window.addEventListener('keydown', e => {
-    if(e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || isEditable(e.target)) return;
-    const tabs = Array.from(document.querySelectorAll('.tab'));
-    if(tabs.length < 2) return;
-    const cur = tabs.findIndex(t => t.classList.contains('active'));
-    let next;
+    if(e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+    const doc = document.scrollingElement || document.documentElement;
+    const max = doc.scrollHeight - window.innerHeight;
+    if(max < 80) return;                       // 没有长内容：不干预
+    const step = Math.max(140, window.innerHeight * 0.88);
+    let to;
     switch(e.key){
-      case 'Home':     next = 0; break;
-      case 'End':      next = tabs.length - 1; break;
-      case 'PageUp':   next = cur <= 0 ? tabs.length - 1 : cur - 1; break;
-      case 'PageDown': next = cur >= tabs.length - 1 ? 0 : cur + 1; break;
+      case 'Home':     to = 0; break;
+      case 'End':      to = max; break;
+      case 'PageUp':   to = doc.scrollTop - step; break;
+      case 'PageDown': to = doc.scrollTop + step; break;
       default: return;
     }
     e.preventDefault();
-    if(next !== cur){
-      tabs[next].click();
-      toast('已切到「' + tabs[next].textContent.trim() + '」');
-    }
+    window.scrollTo({ top: Math.max(0, Math.min(max, to)), behavior: 'smooth' });
   }, true);
 
   /* 定时健康检查 */

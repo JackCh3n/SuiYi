@@ -24,8 +24,6 @@ type Config struct {
 	OpenAIKey        string `json:"openai_key"`        // OpenAI 兼容 API Key
 	OpenAIModel      string `json:"openai_model"`      // OpenAI 兼容 API 模型名
 	Headless         bool   `json:"-"`                 // 无托盘模式（运行时决定，不持久化）
-	ShareUploadURL   string `json:"share_upload_url"`  // 分享截图上传地址（默认本机 qiniu-upload 图床）
-	ShareDir         string `json:"share_dir"`         // 分享截图在图床中的目录名
 }
 
 // Defaults 返回带默认值的配置
@@ -41,8 +39,6 @@ func Defaults() *Config {
 		Autostart:        false,
 		NCTX:             8192,
 		Backend:          "local",
-		ShareUploadURL:   "http://127.0.0.1:9009/api/upload",
-		ShareDir:         "suiyi",
 		OpenAIBaseURL:    "https://api.openai.com/v1",
 		OpenAIModel:      "gpt-4o-mini",
 	}
