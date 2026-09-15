@@ -136,9 +136,9 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
 
 <div class="wrap">
   <nav class="tabs">
-    <div class="tab active" data-pane="p-translate">翻译</div>
-    <div class="tab" data-pane="p-config">设置</div>
-    <div class="tab" data-pane="p-logs">日志</div>
+    <div class="tab active" data-pane="p-translate" title="翻译（PageUp/PageDown 切换页签，Home/End 跳首尾页）">翻译</div>
+    <div class="tab" data-pane="p-config" title="设置（PageUp/PageDown 切换页签）">设置</div>
+    <div class="tab" data-pane="p-logs" title="日志（PageUp/PageDown 切换页签）">日志</div>
   </nav>
 
   <!-- 翻译（Google 式左右对照） -->
@@ -168,6 +168,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           <div class="pane-head">
             <span class="pane-title">原文 <span class="detect-badge" id="detectBadge"></span></span>
             <span class="pane-tools">
+              <button class="icon-btn" id="shareShotBtn" title="把原文+译文截成一张图片并分享（上传图床，返回可粘贴的图片链接）">分享截图</button>
               <button class="icon-btn" id="copySrcBtn" title="复制原文">复制</button>
               <button class="icon-btn" id="pasteBtn" title="粘贴剪贴板">粘贴</button>
               <button class="icon-btn" id="clearBtn" title="清空原文">清空</button>
@@ -263,6 +264,14 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       <div class="set-row">
         <div class="set-left"><h4>GPU 层数（ngl）</h4><p>0=纯 CPU；Vulkan 版设 99 全量 GPU 加速（Radeon 780M 等），改后重启生效</p></div>
         <input type="text" id="cfgNgl" style="width:120px" inputmode="numeric">
+      </div>
+      <div class="set-row">
+        <div class="set-left"><h4>分享图床上传地址</h4><p>「分享截图」把原文+译文图片 POST 到这里（默认本机 qiniu-upload 图床），返回的链接自动复制到剪贴板</p></div>
+        <input type="text" class="set-input" id="cfgShareURL" placeholder="http://127.0.0.1:9009/api/upload">
+      </div>
+      <div class="set-row">
+        <div class="set-left"><h4>分享图片目录</h4><p>图床中的存放目录名（qiniu-upload 的 dir 参数）</p></div>
+        <input type="text" id="cfgShareDir" style="width:160px" placeholder="suiyi">
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
         <button class="btn ghost" id="btnReset">恢复默认</button>
@@ -617,6 +626,10 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       $('#cfgPort').value = d.api_port || 8848;
       $('#cfgNctx').value = d.n_ctx || 8192;
       $('#cfgNgl').value = d.ngl || 0;
+      $('#cfgShareURL').value = d.share_upload_url || '';
+      $('#cfgShareDir').value = d.share_dir || 'suiyi';
+      shareCfg.url = d.share_upload_url || shareCfg.url;
+      shareCfg.dir = d.share_dir || shareCfg.dir;
       $('#cfgBackend').value = d.backend || 'local';
       $('#cfgOpenAIBase').value = d.openai_base_url || '';
       $('#cfgOpenAIKey').value = d.openai_key || '';
@@ -634,6 +647,8 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     $('#cfgPort').value = 8848;
     $('#cfgNctx').value = 8192;
     $('#cfgNgl').value = 0;
+    $('#cfgShareURL').value = 'http://127.0.0.1:9009/api/upload';
+    $('#cfgShareDir').value = 'suiyi';
     $('#cfgBackend').value = 'local';
     $('#cfgOpenAIBase').value = 'https://api.openai.com/v1';
     $('#cfgOpenAIKey').value = '';
@@ -657,13 +672,17 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           backend: $('#cfgBackend').value,
           openai_base_url: $('#cfgOpenAIBase').value.trim(),
           openai_key: $('#cfgOpenAIKey').value.trim(),
-          openai_model: $('#cfgOpenAIModel').value.trim()
+          openai_model: $('#cfgOpenAIModel').value.trim(),
+          share_upload_url: $('#cfgShareURL').value.trim(),
+          share_dir: $('#cfgShareDir').value.trim()
         })});
       const d = await r.json();
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
       if(d && d.ok === false) throw new Error(d.error || '保存失败');
-      // 保存后立即同步翻译页默认语言
+      // 保存后立即同步翻译页默认语言与分享图床配置
       $('#dstLang').value = $('#cfgTarget').value;
+      shareCfg.url = $('#cfgShareURL').value.trim() || shareCfg.url;
+      shareCfg.dir = $('#cfgShareDir').value.trim();
       toast('设置已保存' + ($('#cfgBackend').value !== backend ? '（重启后生效）' : ''));
     }catch(e){
       toast('保存失败：' + e.message);
@@ -684,6 +703,110 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   }
   $('#btnRefreshLogs').onclick = loadLogs;
 
+  /* 分享截图：把「原文 + 译文」画成一张卡片图片 → 上传图床 → 链接复制到剪贴板 */
+  const shareCfg = { url: 'http://127.0.0.1:9009/api/upload', dir: 'suiyi' };
+  const SHARE_FONT = '-apple-system,"Segoe UI","Microsoft YaHei",sans-serif';
+  const langLabel = sel => {
+    const o = sel && sel.selectedOptions && sel.selectedOptions[0];
+    return o ? o.textContent.split(' (')[0] : '';
+  };
+  function wrapLines(ctx, text, maxWidth){
+    const out = [];
+    for(const para of String(text).split('\n')){
+      let line = '';
+      for(const ch of Array.from(para)){
+        if(line && ctx.measureText(line + ch).width > maxWidth){ out.push(line); line = ch; }
+        else line += ch;
+      }
+      out.push(line);
+    }
+    return out;
+  }
+  function drawShareCard(src, srcLang, dst, dstLang){
+    const W = 1000, PAD = 48, BODY = W - PAD * 2, LINE = 30;
+    const cv = document.createElement('canvas');
+    const ctx = cv.getContext('2d');
+    ctx.font = '17px ' + SHARE_FONT;
+    const srcLines = wrapLines(ctx, src, BODY);
+    const dstLines = wrapLines(ctx, dst, BODY);
+    const H = 96 + 42 + srcLines.length * LINE + 34 + 42 + dstLines.length * LINE + 84;
+    cv.width = W; cv.height = H;
+
+    ctx.fillStyle = '#eef1f6'; ctx.fillRect(0, 0, W, H);          // 底：浅灰（底部留灰边）
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H - 14);      // 卡片
+    const g = ctx.createLinearGradient(0, 0, W, 0);                // 顶部品牌渐变条
+    g.addColorStop(0, '#3370ff'); g.addColorStop(1, '#00b42a');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, 6);
+
+    ctx.fillStyle = '#1f2329'; ctx.font = '600 24px ' + SHARE_FONT;
+    ctx.fillText('随译 SuiYi', PAD, 58);
+    ctx.textAlign = 'right';
+    ctx.font = '15px ' + SHARE_FONT; ctx.fillStyle = '#8a9099';
+    ctx.fillText((srcLang || '自动') + '  →  ' + (dstLang || ''), W - PAD, 50);
+    ctx.fillText(new Date().toLocaleString('zh-CN'), W - PAD, 74);
+    ctx.textAlign = 'left';
+
+    let y = 106;
+    const section = (title, color, lines, textColor) => {
+      ctx.fillStyle = color; ctx.font = '600 13px ' + SHARE_FONT;
+      ctx.fillText(title, PAD, y);
+      y += 22;
+      ctx.fillStyle = textColor; ctx.font = '17px ' + SHARE_FONT;
+      for(const l of lines){ ctx.fillText(l, PAD, y); y += LINE; }
+      y += 34;
+    };
+    section('原文 · ' + (srcLang || '自动识别'), '#8a9099', srcLines, '#4e5969');
+    section('译文 · ' + (dstLang || ''), '#3370ff', dstLines, '#1f2329');
+
+    ctx.fillStyle = '#e5e6eb'; ctx.fillRect(PAD, H - 78, BODY, 1);
+    ctx.fillStyle = '#a8adb5'; ctx.font = '13px ' + SHARE_FONT;
+    ctx.fillText('随译 SuiYi · 本地离线翻译 · ' + location.host, PAD, H - 48);
+
+    return new Promise(res => cv.toBlob(res, 'image/png'));
+  }
+  async function copyTextToClip(t){
+    try{ await navigator.clipboard.writeText(t); return true; }catch(e){ return false; }
+  }
+  async function copyPNGToClip(blob){
+    if(!window.ClipboardItem || !navigator.clipboard || !navigator.clipboard.write) return false;
+    try{ await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]); return true; }
+    catch(e){ return false; }
+  }
+  async function uploadShareImage(blob){
+    const base = (shareCfg.url || '').trim() || 'http://127.0.0.1:9009/api/upload';
+    const url = shareCfg.dir ? base + (base.includes('?') ? '&' : '?') + 'dir=' + encodeURIComponent(shareCfg.dir) : base;
+    const fd = new FormData();
+    fd.append('file', blob, 'suiyi-' + Date.now() + '.png');
+    const r = await fetch(url, { method: 'POST', body: fd });
+    const d = await r.json().catch(() => null);
+    if(d && d.code === 0 && d.data && d.data.url) return d.data.url;
+    throw new Error((d && d.error) || ('HTTP ' + r.status));
+  }
+  $('#shareShotBtn').onclick = async () => {
+    const src = srcText.value.trim();
+    const dst = (resultText.textContent || '').trim();
+    if(!src){ toast('先输入原文再分享'); srcText.focus(); return; }
+    if(!dst || dst === '译文将显示在这里'){ toast('还没有译文，先翻译再分享'); return; }
+    const btn = $('#shareShotBtn'), orig = btn.textContent;
+    btn.disabled = true; btn.textContent = '生成中…';
+    try{
+      const blob = await drawShareCard(src, langLabel($('#srcLang')), dst, langLabel($('#dstLang')));
+      if(!blob) throw new Error('canvas 导出失败');
+      const imgCopied = await copyPNGToClip(blob);   // 顺手放进剪贴板：上传失败也能直接用
+      try{
+        const link = await uploadShareImage(blob);
+        const ok = await copyTextToClip(link);
+        toast(ok ? '已上传并复制链接：' + link : '已上传：' + link);
+      }catch(err){
+        toast('图床不可用（' + err.message + '）' + (imgCopied ? '，截图已复制到剪贴板，可直接粘贴' : '，且浏览器不允许写图片剪贴板'));
+      }
+    }catch(e){
+      toast('分享截图失败：' + e.message);
+    }finally{
+      btn.disabled = false; btn.textContent = orig;
+    }
+  };
+
   /* Tab */
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
@@ -692,6 +815,33 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     document.getElementById(t.dataset.pane).classList.add('active');
     if(t.dataset.pane === 'p-logs') loadLogs(); // 切到日志页自动加载
   });
+
+  /* 键盘监控：Home/End → 首个/最后一个页签；PageUp/PageDown → 上一个/下一个页签。
+     焦点在输入控件内时完全不拦截（保留文本的 Home/End 光标行为与文本域滚动），
+     带 Ctrl/Alt/Shift 修饰键时也放行，避免抢掉浏览器/系统的既有快捷键。 */
+  const isEditable = el => {
+    const tag = ((el && el.tagName) || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || !!(el && el.isContentEditable);
+  };
+  window.addEventListener('keydown', e => {
+    if(e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || isEditable(e.target)) return;
+    const tabs = Array.from(document.querySelectorAll('.tab'));
+    if(tabs.length < 2) return;
+    const cur = tabs.findIndex(t => t.classList.contains('active'));
+    let next;
+    switch(e.key){
+      case 'Home':     next = 0; break;
+      case 'End':      next = tabs.length - 1; break;
+      case 'PageUp':   next = cur <= 0 ? tabs.length - 1 : cur - 1; break;
+      case 'PageDown': next = cur >= tabs.length - 1 ? 0 : cur + 1; break;
+      default: return;
+    }
+    e.preventDefault();
+    if(next !== cur){
+      tabs[next].click();
+      toast('已切到「' + tabs[next].textContent.trim() + '」');
+    }
+  }, true);
 
   /* 定时健康检查 */
   loadLangs().then(checkHealth).then(loadConfig);

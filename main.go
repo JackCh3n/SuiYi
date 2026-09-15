@@ -202,7 +202,7 @@ func run(o appOptions) int {
 	quit := make(chan struct{})
 	requestQuit := func() { quitOnce.Do(func() { close(quit) }) }
 
-	// 系统托盘：显示主窗口 / 打开浏览器 / 退出
+	// 系统托盘：左键显示主窗口；右键菜单 显示主窗口 / 打开浏览器 / 退出
 	show := make(chan struct{}, 1)
 	trayReady := make(chan struct{})
 	if o.tray {
@@ -211,10 +211,14 @@ func run(o appOptions) int {
 			Tooltip: "随译 SuiYi · 本地翻译服务",
 			OnReady: func() { close(trayReady) },
 			OnShow: func() {
-				select {
-				case show <- struct{}{}:
-				default:
+				if o.window {
+					select {
+					case show <- struct{}{}:
+					default:
+					}
+					return
 				}
+				_ = openBrowser(webURL) // 无窗口模式（serve）：左键退化为打开浏览器
 			},
 			OnOpen: func() { _ = openBrowser(webURL) },
 			OnQuit: requestQuit,

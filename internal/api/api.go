@@ -428,6 +428,8 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			OpenAIBaseURL    *string `json:"openai_base_url"`
 			OpenAIKey        *string `json:"openai_key"`
 			OpenAIModel      *string `json:"openai_model"`
+			ShareUploadURL   *string `json:"share_upload_url"`
+			ShareDir         *string `json:"share_dir"`
 		}
 		if err := readJSON(r, &patch); err != nil {
 			writeJSON(w, 400, map[string]string{"error": err.Error()})
@@ -479,6 +481,12 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.OpenAIModel != nil {
 			s.cfg.OpenAIModel = *patch.OpenAIModel
+		}
+		if patch.ShareUploadURL != nil {
+			s.cfg.ShareUploadURL = strings.TrimSpace(*patch.ShareUploadURL)
+		}
+		if patch.ShareDir != nil {
+			s.cfg.ShareDir = strings.TrimSpace(*patch.ShareDir)
 		}
 		if err := s.cfg.Save(); err != nil {
 			writeJSON(w, 500, map[string]string{"error": "保存配置失败: " + err.Error()})

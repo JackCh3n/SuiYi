@@ -22,7 +22,8 @@
 - **可选 token 鉴权**：设置 token 后 API 需鉴权，防本机程序滥用
 - **多后端**：
   - `local`（默认）：本地 llama.cpp（llama-server 子进程），完全离线
-  - `hymt`：hy-mt-rs 引擎，支持 AngelSlim 官方 **1.25bit（STQ1_0）** GGUF（440MB，省内存）
+  - `hymt`：hy-mt-rs 引擎，支持 AngelSlim 官方 **1.25bit（STQ1_0）** 与 **2bit（SEQ）** GGUF（体积小、省内存）
+  - 模型切换时**按文件类型自动路由后端**（2bit/1.25bit → `hymt`，其余 → 本地 llama-server）
   - `openai`：任意 OpenAI 兼容 API（OpenAI / 通义 / DeepSeek / 本地自建等）
 - **模型下拉切换**：把 `.gguf` 放入 `models/` 目录，Web 设置页下拉选择并「刷新」
 - **批量翻译**：每行一条，串行处理，结果表格展示并可复制
@@ -31,8 +32,13 @@
 - **跨平台构建**：GitHub Actions + CNB 双 CI 自动构建 11 平台 Release
 - **桌面 GUI 与服务合一（Windows）**：单个 `suiyi.exe` 默认打开 Wails v2.12 + WebView2 原生窗口（内嵌完整 Web 界面），
   同时监听 `127.0.0.1:8848`，任意浏览器可直接访问；默认**不显示控制台黑窗口**（推理子进程也后台运行），
-  加 `-debug` 才弹调试控制台；系统托盘菜单提供**显示主窗口 / 打开浏览器 / 退出**，
+  加 `-debug` 才弹调试控制台；**左键单击托盘图标显示主窗口**，右键菜单为 **显示主窗口 / 打开浏览器 / 退出**，
   关闭窗口自动隐藏到托盘继续后台服务；重复启动会先清理旧实例与推理进程，不会端口冲突
+- **键盘快捷键（窗口内，浏览器里同样生效）**：`Home`/`End` 跳到第一个/最后一个页签，
+  `PageUp`/`PageDown` 上一个/下一个页签循环切换；焦点在输入框内时自动放行，不干扰打字
+- **分享截图**：原文面板左上角「分享截图」把 **原文 + 译文** 画成一张卡片图，
+  POST 到本机图床（默认 qiniu-upload `127.0.0.1:9009`，地址/目录可在设置页改），
+  成功即把图片链接复制到剪贴板；图床不可用时退化为「图片已复制到剪贴板」并说明原因
 
 ---
 
@@ -51,10 +57,16 @@ suiyi/
 - 从 llama.cpp 官方 Release 获取 `llama-server`（Windows CPU x64），放入 `third_party/windows/amd64/`
 - 从 HuggingFace / ModelScope 下载 Hy-MT2 GGUF，放入 `models/`
 
-> **关于 STQ 模型**：`1.25bit-v2` 等使用 AngelSlim STQ 极低比特量化，**标准 llama.cpp 无法正确解码**
-> （PR #22836 的 x86 内核问题）。使用 `1.25bit-v2` 时请切换 **`hymt` 后端**（hy-mt-rs 引擎，
-> 见 [设计文档](设计文档.md) §2.3）；`2bit-v2`（SEQ）当前无可用引擎（llama.cpp / hy-mt 均不支持）。
-> 默认仍使用 `Q4_K_M`。
+> **关于 STQ 极低比特模型**：`1.25bit`（STQ1_0 / type 40）与 `2bit`（SEQ / type 41）是腾讯 AngelSlim 的
+> 私有极低比特量化，**标准 llama.cpp 加载会报 `tensor '...' has offset X, expected Y`**。
+> 本项目内置 hy-mt-rs 引擎（`third_party/windows/amd64/hymt/hy-mt.exe`）解码这两种格式：
+> 把 GGUF 放进 `models/` 后，Web 设置页选中即用——**推理后端会按模型文件名自动切换**
+> （含 `2bit` / `1.25bit` → `hymt`；其余如 `Q4_K_M` → 本地 llama-server），原理见
+> [设计文档](设计文档.md) §2.3 与 §6.11。默认仍使用兼容性最好的 `Q4_K_M`。
+>
+> 实测（2026-09-14）：`Hy-MT2-1.8B-1.25bit-v2.gguf`、`Hy-MT1.5-1.8B-1.25bit.gguf`、
+> `Hy-MT2-1.8B-2bit-v2.gguf` 三种均翻译正常；本地用脚本改过张量类型的
+> `Hy-MT2-1.8B-1.25bit-v2.fixed.gguf` 会报 `unsupported ggml dtype id 43`，改用官方 `-v2.gguf` 即可。
 
 ### 2. 启动
 
@@ -79,6 +91,10 @@ build\suiyi.exe serve              :: 托盘 + API/Web，无桌面窗口
 build\suiyi.exe serve -headless    :: 无窗口、无托盘（Linux/macOS 服务器常用）
 ```
 
+> 通用参数：`-port <n>` 覆盖 API 端口、`-ngl <n>` GPU 层数、`-debug` 显示控制台、
+> `-headless` 不显示桌面窗口、`-notray` 不显示托盘图标。
+> （`serve` 默认就是无窗口 + 托盘；`-headless` 在此之上再去掉托盘。）
+
 > 关于控制台：Windows 版以 GUI 子系统构建（`-H=windowsgui`），默认不出现黑窗口；
 > 需要日志时加 `-debug`，程序会动态分配控制台并把 stdout / 日志接进去。
 > 启动失败且无控制台时，会弹出错误对话框（避免双击后毫无反馈）。
@@ -100,7 +116,20 @@ build\suiyi.exe serve -headless    :: 无窗口、无托盘（Linux/macOS 服务
   - 推理后端：`本地 llama.cpp` 或 `OpenAI 兼容 API`（填基地址 / Key / 模型名）
   - 模型文件：下拉选择 `models/` 下的 GGUF，放入新模型后点「刷新」
   - 默认目标语言（默认中文）、端口等
+  - **分享图床上传地址 / 分享图片目录**：「分享截图」的上传目标（默认 `http://127.0.0.1:9009/api/upload` + 目录 `suiyi`）
   - 修改端口或切换后端后需**重启服务**生效
+
+### 4. 键盘快捷键与分享截图
+
+| 按键 | 作用 |
+|------|------|
+| `Home` / `End` | 跳到第一个 / 最后一个页签（翻译 / 设置 / 日志） |
+| `PageUp` / `PageDown` | 上一个 / 下一个页签（首尾循环切换） |
+
+- 焦点在输入框 / 文本域 / 下拉框内时**不拦截**，保留浏览器原生光标与滚动行为；带 `Ctrl`/`Alt`/`Shift` 时也放行
+- 在浏览器里打开 <http://127.0.0.1:8848> 时这套快捷键同样可用
+- **分享截图**：原文面板左上角按钮 → 生成「原文 + 译文」卡片图 → 上传图床 → 图片链接入剪贴板；
+  图床（qiniu-upload）没启动时会提示原因，并把图片放进剪贴板兜底
 
 ### 4. 命令行单次翻译（服务需已运行）
 
@@ -128,7 +157,7 @@ build\suiyi.exe translate "你好世界" -t en
 
 | 接口 | 方法 | 说明 |
 |---|---|---|
-| `/health` | GET | 服务与后端状态（含 `backend`、`engine`） |
+| `/health` | GET | 服务与后端状态（`backend` + `engine`）；推理进程退出时 `engine=false`，自动重启后转回 `true` |
 | `/translate` | POST | `{text, source?, target?, glossary?, style?}` |
 | `/translate/stream` | POST | SSE 流式翻译（增量 `delta` + 进度 `progress`/`stage`/`eta`/`tps`） |
 | `/languages` | GET | 支持语言列表 |
@@ -171,9 +200,10 @@ build.bat debug    :: 构建并带 -debug 控制台启动
 ```
 suiyi/
 ├── main.go                    # 统一入口：GUI + 服务（serve / translate 子命令）
-├── console_windows.go         # -debug 时分配控制台；无控制台时错误弹窗
-├── browser_windows.go         # 调默认浏览器打开管理界面
-├── ui_windows.go              # 平台分支：Windows 走桌面窗口，其他平台走服务模式
+├── console_windows.go         # -debug 分配控制台；无可见输出时错误弹窗（console_other.go 为 noop）
+├── browser_windows.go         # 打开默认浏览器（browser_other.go：open / xdg-open）
+├── ui_windows.go + ui_other.go # 平台分支：Windows 走桌面窗口，其他平台走服务模式
+├── instance_windows.go        # 启动前清理旧实例与残留推理进程（instance_other.go 为 noop）
 ├── build.bat                  # Windows 本地构建脚本（构建 + 启动，支持 debug）
 ├── internal/
 │   ├── appcore/               # 服务核心聚合（引擎+队列+API，各入口共用）
@@ -181,8 +211,9 @@ suiyi/
 │   │   ├── gui_windows.go     #   窗口配置、原生菜单、前端 embed
 │   │   ├── app_windows.go     #   Wails 绑定（版本/API 地址/显示隐藏/打开目录）
 │   │   └── frontend/index.html #  窗口首页（重定向到本地 Web 界面）
-│   ├── tray/                  # 系统托盘（显示主窗口/打开浏览器/退出）
+│   ├── tray/                  # 系统托盘（纯 Win32：左键显示主窗口 / 右键菜单）
 │   ├── engine/                # llama-server 子进程管理 + OpenAI 兼容客户端
+│   │   └── proc_windows.go    #   子进程后台拉起（CREATE_NO_WINDOW，不弹黑窗口）
 │   ├── api/                   # REST API + Web 静态资源(embed)
 │   ├── queue/                 # 翻译队列（串行）
 │   ├── config/                # 配置读写（多后端字段）

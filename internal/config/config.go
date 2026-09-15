@@ -8,22 +8,24 @@ import (
 
 // Config 应用配置（内存缓存 + data/config.json 持久化）
 type Config struct {
-	APIPort          int    `json:"api_port"`           // Web/API 端口
-	EnginePort       int    `json:"engine_port"`        // llama-server 推理端口
-	ModelPath        string `json:"model_path"`         // 模型文件路径
-	EnginePath       string `json:"engine_path"`        // llama-server 可执行文件路径
-	TargetLang       string `json:"target_lang"`        // 默认目标语言代码
-	SaveMemory       bool   `json:"save_memory"`        // 省内存模式（按需加载）
-	ClipboardEnabled bool   `json:"clipboard_enabled"`  // 剪贴板自动翻译开关
-	Autostart        bool   `json:"autostart"`          // 开机自启（Windows 注册表 Run 键）
-	NCTX             int    `json:"n_ctx"`              // 推理上下文长度（长文本需加大）
-	NGL              int    `json:"ngl"`                // GPU 层数（0=纯 CPU；Vulkan 版可设 99 全量 GPU）
-	Token            string `json:"token"`              // 可选鉴权 token（空=不鉴权）
-	Backend          string `json:"backend"`            // "local"（本地 llama）或 "openai"（OpenAI 兼容 API）
-	OpenAIBaseURL    string `json:"openai_base_url"`    // OpenAI 兼容 API 基地址（含 /v1）
-	OpenAIKey        string `json:"openai_key"`         // OpenAI 兼容 API Key
-	OpenAIModel      string `json:"openai_model"`       // OpenAI 兼容 API 模型名
-	Headless         bool   `json:"-"`                  // 无托盘模式（运行时决定，不持久化）
+	APIPort          int    `json:"api_port"`          // Web/API 端口
+	EnginePort       int    `json:"engine_port"`       // llama-server 推理端口
+	ModelPath        string `json:"model_path"`        // 模型文件路径
+	EnginePath       string `json:"engine_path"`       // llama-server 可执行文件路径
+	TargetLang       string `json:"target_lang"`       // 默认目标语言代码
+	SaveMemory       bool   `json:"save_memory"`       // 省内存模式（按需加载）
+	ClipboardEnabled bool   `json:"clipboard_enabled"` // 剪贴板自动翻译开关
+	Autostart        bool   `json:"autostart"`         // 开机自启（Windows 注册表 Run 键）
+	NCTX             int    `json:"n_ctx"`             // 推理上下文长度（长文本需加大）
+	NGL              int    `json:"ngl"`               // GPU 层数（0=纯 CPU；Vulkan 版可设 99 全量 GPU）
+	Token            string `json:"token"`             // 可选鉴权 token（空=不鉴权）
+	Backend          string `json:"backend"`           // "local"（本地 llama）或 "openai"（OpenAI 兼容 API）
+	OpenAIBaseURL    string `json:"openai_base_url"`   // OpenAI 兼容 API 基地址（含 /v1）
+	OpenAIKey        string `json:"openai_key"`        // OpenAI 兼容 API Key
+	OpenAIModel      string `json:"openai_model"`      // OpenAI 兼容 API 模型名
+	Headless         bool   `json:"-"`                 // 无托盘模式（运行时决定，不持久化）
+	ShareUploadURL   string `json:"share_upload_url"`  // 分享截图上传地址（默认本机 qiniu-upload 图床）
+	ShareDir         string `json:"share_dir"`         // 分享截图在图床中的目录名
 }
 
 // Defaults 返回带默认值的配置
@@ -39,6 +41,8 @@ func Defaults() *Config {
 		Autostart:        false,
 		NCTX:             8192,
 		Backend:          "local",
+		ShareUploadURL:   "http://127.0.0.1:9009/api/upload",
+		ShareDir:         "suiyi",
 		OpenAIBaseURL:    "https://api.openai.com/v1",
 		OpenAIModel:      "gpt-4o-mini",
 	}
