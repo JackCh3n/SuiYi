@@ -151,9 +151,14 @@ build\suiyi.exe translate "你好世界" -t en
 |---|---|
 | API 基地址 | `https://api.openai.com/v1`、`https://dashscope.aliyuncs.com/compatible-mode/v1`、`http://127.0.0.1:8000/v1` |
 | API Key | `sk-...`（本地自建可留空） |
-| 模型名 | `gpt-4o-mini`、`qwen-plus`、`deepseek-chat` 等 |
+| 模型名 | `gpt-4o-mini`、`qwen-plus`、`deepseek-chat`、`hy-mt2-pro`（腾讯 TokenHub 在线推理的服务 ID）等 |
 
 保存后重启服务生效。此时无需本地模型与 llama-server，`/health` 显示 `backend=openai`。
+
+> **模型名要填服务方认的那个名字**：程序会把「模型名」原样写进 `/chat/completions` 的 `model` 字段
+> （本地 llama-server 用的 `suiyi` 只是内部别名，不会发给第三方）。填错会直接收到对方的 400，
+> 例如腾讯 TokenHub 会回 `The model or service ID xxx does not exist`；留空则本地直接提示
+> 「未配置模型名/服务 ID」。改**模型名 / API 基地址 / Key** 都需要重启服务生效（保存时会有提示）。
 
 ---
 

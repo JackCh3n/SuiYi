@@ -34,10 +34,22 @@ func NewOpenAI(baseURL, key, model string) *OpenAI {
 	}
 }
 
+// withModel 远程后端一律用设置里的「模型名 / 服务 ID」。
+// 调用方（appcore.ChatReq）填的 "suiyi" 只是本地 llama-server 的别名，
+// 直接发给第三方 API 会报「模型或服务 ID suiyi 不存在」（400004）。
+func (o *OpenAI) withModel(r ChatRequest) (ChatRequest, error) {
+	if strings.TrimSpace(o.model) == "" {
+		return r, fmt.Errorf("未配置模型名/服务 ID：请在「设置 → 推理后端 → 模型名」填写（如 hy-mt2-pro）")
+	}
+	r.Model = o.model
+	return r, nil
+}
+
 // Complete 通过 OpenAI 兼容 /chat/completions 执行一次生成
 func (o *OpenAI) Complete(ctx context.Context, r ChatRequest) (string, error) {
-	if r.Model == "" {
-		r.Model = o.model
+	r, err := o.withModel(r)
+	if err != nil {
+		return "", err
 	}
 	raw, err := json.Marshal(r)
 	if err != nil {
@@ -63,7 +75,7 @@ func (o *OpenAI) Complete(ctx context.Context, r ChatRequest) (string, error) {
 		return "", err
 	}
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("OpenAI 错误 %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return "", openaiHTTPError(resp.StatusCode, body)
 	}
 	type choice struct {
 		Message struct {
@@ -80,4 +92,27 @@ func (o *OpenAI) Complete(ctx context.Context, r ChatRequest) (string, error) {
 		return "", fmt.Errorf("OpenAI 未返回结果")
 	}
 	return strings.TrimSpace(out.Choices[0].Message.Content), nil
+}
+
+// openaiHTTPError 把第三方 API 的错误体整理成人能读的信息：
+// 优先取 message_zh / message，取不到就原样返回。
+func openaiHTTPError(status int, body []byte) error {
+	var e struct {
+		Error struct {
+			Message   string `json:"message"`
+			MessageZh string `json:"message_zh"`
+			Code      any    `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &e); err == nil && (e.Error.MessageZh != "" || e.Error.Message != "") {
+		msg := e.Error.MessageZh
+		if msg == "" {
+			msg = e.Error.Message
+		}
+		if e.Error.Code != nil {
+			return fmt.Errorf("OpenAI 错误 %d（%v）: %s", status, e.Error.Code, msg)
+		}
+		return fmt.Errorf("OpenAI 错误 %d: %s", status, msg)
+	}
+	return fmt.Errorf("OpenAI 错误 %d: %s", status, strings.TrimSpace(string(body)))
 }

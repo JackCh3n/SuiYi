@@ -294,6 +294,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   const $ = s => document.querySelector(s);
   let langs = [];
   let backend = 'local';
+  let openaiLoaded = { base: '', key: '', model: '' }; // 载入时的 OpenAI 配置（判断是否需要重启）
   let translating = false;
   let abortCtrl = null; // 当前翻译请求的 AbortController（停止用）
   const toast = msg => { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); };
@@ -622,6 +623,8 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       $('#cfgOpenAIBase').value = d.openai_base_url || '';
       $('#cfgOpenAIKey').value = d.openai_key || '';
       $('#cfgOpenAIModel').value = d.openai_model || '';
+      // OpenAI 客户端在启动时构建（模型名/地址/Key 都固化在里面），改了必须重启才生效
+      openaiLoaded = { base: d.openai_base_url || '', key: d.openai_key || '', model: d.openai_model || '' };
       syncOpenaiGroup();
       await loadModels(d.model_path);
     }catch(e){ toast('读取配置失败：' + e.message); }
@@ -665,7 +668,11 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       if(d && d.ok === false) throw new Error(d.error || '保存失败');
       // 保存后立即同步翻译页默认语言
       $('#dstLang').value = $('#cfgTarget').value;
-      toast('设置已保存' + ($('#cfgBackend').value !== backend ? '（重启后生效）' : ''));
+      const openaiChanged = $('#cfgOpenAIBase').value.trim() !== openaiLoaded.base
+        || $('#cfgOpenAIKey').value.trim() !== openaiLoaded.key
+        || $('#cfgOpenAIModel').value.trim() !== openaiLoaded.model;
+      const needRestart = $('#cfgBackend').value !== backend || openaiChanged;
+      toast('设置已保存' + (needRestart ? '（重启后生效）' : ''));
     }catch(e){
       toast('保存失败：' + e.message);
       loadConfig(); // 失败（如模型切换回退）后刷新设置页显示实际值

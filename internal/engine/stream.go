@@ -93,10 +93,11 @@ func (e *Engine) CompleteStream(ctx context.Context, r ChatRequest, emit func(st
 
 // CompleteStream 通过 OpenAI 兼容流式接口生成（远程 API）
 func (o *OpenAI) CompleteStream(ctx context.Context, r ChatRequest, emit func(string) error) (int, error) {
-	r.Stream = true
-	if r.Model == "" {
-		r.Model = o.model
+	r, err := o.withModel(r)
+	if err != nil {
+		return 0, err
 	}
+	r.Stream = true
 	raw, err := json.Marshal(r)
 	if err != nil {
 		return 0, err
@@ -119,7 +120,7 @@ func (o *OpenAI) CompleteStream(ctx context.Context, r ChatRequest, emit func(st
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		return 0, fmt.Errorf("OpenAI 错误 %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return 0, openaiHTTPError(resp.StatusCode, body)
 	}
 	return parseSSE(ctx, resp.Body, emit)
 }
