@@ -339,13 +339,19 @@ func runTranslate(args []string) int {
 	}
 	text := args[len(args)-1]
 	target := "en"
-	port := 8848
+	port := 0 // 0 = 未指定，用配置里的端口（端口可配置，不能写死 8848）
 	for i := 0; i < len(args)-1; i++ {
 		switch args[i] {
 		case "-t":
 			target = args[i+1]
 		case "-p":
 			fmt.Sscanf(args[i+1], "%d", &port)
+		}
+	}
+	if port == 0 {
+		port = config.Defaults().APIPort
+		if cfg, err := config.Load(); err == nil && cfg.APIPort > 0 {
+			port = cfg.APIPort
 		}
 	}
 	body, _ := json.Marshal(map[string]string{"text": text, "target": target})

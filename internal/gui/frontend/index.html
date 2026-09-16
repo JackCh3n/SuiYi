@@ -8,29 +8,71 @@
 <style>
   body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:#f5f6fa;color:#646a73;
        display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
-  div{text-align:center}
+  div{text-align:center;max-width:440px}
   .logo{width:56px;height:56px;line-height:56px;margin:0 auto 16px;border-radius:14px;
        background:linear-gradient(135deg,#3370ff,#00b42a);color:#fff;font-size:26px;font-weight:700}
   h2{color:#1f2329;margin:0 0 8px;font-weight:600}
-  p{font-size:14px}
+  p{font-size:14px;line-height:1.7;word-break:break-all}
+  button{margin-top:14px;padding:8px 20px;border:none;border-radius:8px;background:#3370ff;color:#fff;
+        font-size:14px;cursor:pointer;display:none}
+  code{background:#eef1f6;border-radius:4px;padding:1px 6px;font-size:13px}
 </style>
 </head>
 <body>
 <div>
   <div class="logo">译</div>
   <h2>随译 SuiYi</h2>
-  <p>正在启动本地翻译服务…</p>
+  <p id="msg">正在连接本地翻译服务…</p>
+  <button id="retry">重 试</button>
 </div>
 <script>
-  function go(url){
-    if (url) window.location.replace(url);
-    else document.querySelector('p').textContent = '服务启动失败，请检查日志';
+/* 本地服务地址由 Go 端注入（端口可配置，绝不写死 8848）：
+   首页只做一件事——探测服务就绪后跳到 Web 管理界面。
+   探测用 no-cors 模式：跨端口探测不需要服务端配 CORS，连不上会 reject，
+   能连上就 resolve（不读响应体），因此只用来判断"服务起没起来"。 */
+(function(){
+  var API = "__SUIYI_API_URL__";
+  var msg = document.getElementById('msg'), retry = document.getElementById('retry');
+  var tries = 0;
+
+  function fail(html){ msg.innerHTML = html; retry.style.display = 'inline-block'; }
+
+  // 注入失败时的兜底：问 Wails 绑定要地址（理论上不会走到这里）
+  function viaBinding(){
+    if (window.go && window.go.main && window.go.main.App && window.go.main.App.GetAPIURL) {
+      window.go.main.App.GetAPIURL().then(function(u){ window.location.replace(u); })
+        .catch(function(){ fail('未能从应用获取本地服务地址，请重新启动随译。'); });
+      return true;
+    }
+    return false;
   }
-  if (window.go && window.go.main && window.go.main.App && window.go.main.App.GetAPIURL) {
-    window.go.main.App.GetAPIURL().then(go).catch(function(){ go('http://127.0.0.1:8848/'); });
-  } else {
-    setTimeout(function(){ go('http://127.0.0.1:8848/'); }, 400);
+
+  function connect(){
+    if (!API || API.indexOf('http') !== 0) {
+      if (!viaBinding()) fail('未能获取本地服务地址，请重新启动随译。');
+      return;
+    }
+    tries++;
+    fetch(API + 'health', {mode:'no-cors', cache:'no-store'}).then(function(){
+      window.location.replace(API);   // 服务已就绪 → 进管理界面
+    }).catch(function(e){
+      if (tries < 60) {               // 最多等约 30 秒（服务/引擎还在启动）
+        if (tries > 1) msg.textContent = '正在连接本地服务…（第 ' + tries + ' 次）';
+        setTimeout(connect, 500);
+      } else {
+        fail('连不上本地服务 <code>' + API + '</code><br>' + (e && e.message ? e.message : e) +
+             '<br><br>请确认随译服务已启动、端口未被占用；也可直接用浏览器打开上面的地址。');
+      }
+    });
   }
+
+  retry.onclick = function(){
+    tries = 0; retry.style.display = 'none';
+    msg.textContent = '正在连接本地翻译服务…';
+    connect();
+  };
+  connect();
+})();
 </script>
 </body>
 </html>

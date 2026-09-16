@@ -10,8 +10,10 @@
 package gui
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
+	"net/http"
 	"os/exec"
 
 	"github.com/wailsapp/wails/v2"
@@ -24,6 +26,11 @@ import (
 
 //go:embed all:frontend
 var assets embed.FS
+
+// apiURLPlaceholder 窗口首页里的占位符：启动时替换成真实的本地地址。
+// 页面原先靠 Wails 绑定（window.go）取地址，绑定注入存在时序竞争、且兜底值写死 8848，
+// 用户把端口改成 9848 后首页就变成"127.0.0.1 拒绝连接"——改为 Go 端注入，彻底去掉竞态。
+const apiURLPlaceholder = "__SUIYI_API_URL__"
 
 // Options 窗口启动参数
 type Options struct {
@@ -44,6 +51,9 @@ type Options struct {
 // Run 启动窗口（阻塞，须在主 goroutine 调用；窗口退出后返回）
 func Run(o Options) error {
 	app := &App{apiURL: o.APIURL, version: o.Version, ready: make(chan struct{})}
+
+	// 把真实地址注入首页（端口可配置，页面上不再有写死的 8848）
+	indexPage := bytes.ReplaceAll(mustReadAsset("frontend/index.html"), []byte(apiURLPlaceholder), []byte(o.APIURL))
 
 	if o.QuitCh != nil {
 		go func() {
@@ -68,8 +78,19 @@ func Run(o Options) error {
 		MinWidth:  900,
 		MinHeight: 640,
 		AssetServer: &assetserver.Options{
-			// 首页（frontend/index.html）通过绑定 GetAPIURL 获得地址后重定向到本地 Web 界面
 			Assets: assets,
+			// 首页（frontend/index.html）由这里注入真实地址后加载并跳转本地 Web 界面；
+			// Middleware 在静态资源之前执行，才抢得到 "/"（Assets 会先命中 index.html）
+			Middleware: assetserver.ChainMiddleware(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+						w.Header().Set("Content-Type", "text/html; charset=utf-8")
+						_, _ = w.Write(indexPage)
+						return
+					}
+					next.ServeHTTP(w, r)
+				})
+			}),
 		},
 		Menu:                     buildMenu(app),
 		BackgroundColour:         options.NewRGB(245, 246, 250),
@@ -121,6 +142,15 @@ func buildMenu(app *App) *menu.Menu {
 		app.About()
 	})
 	return m
+}
+
+// mustReadAsset 读内嵌资源（编译期就存在，失败即 panic，避免带着坏页面启动）
+func mustReadAsset(name string) []byte {
+	b, err := assets.ReadFile(name)
+	if err != nil {
+		panic("内嵌资源缺失: " + name + ": " + err.Error())
+	}
+	return b
 }
 
 // openURL 在默认浏览器打开地址（Windows：rundll32，不弹命令行窗口）
