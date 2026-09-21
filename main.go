@@ -16,7 +16,6 @@
 package main
 
 import (
-	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -35,9 +34,7 @@ import (
 	"suiyi/internal/api"
 	"suiyi/internal/appcore"
 	"suiyi/internal/autostart"
-	"suiyi/internal/clipboard"
 	"suiyi/internal/config"
-	"suiyi/internal/queue"
 	"suiyi/internal/tray"
 )
 
@@ -190,13 +187,6 @@ func run(o appOptions) int {
 	// 开机自启：按配置应用（Windows 注册表 Run 键）
 	applyAutostart(core, cfg)
 
-	// 剪贴板自动翻译：复制即译（去抖/过滤由 clipboard 包处理）
-	if cfg.ClipboardEnabled && o.tray {
-		clipCtx, clipCancel := context.WithCancel(context.Background())
-		defer clipCancel()
-		startClipboard(clipCtx, core, cfg)
-	}
-
 	// 退出协调：托盘「退出」/ 窗口关闭 / Ctrl+C
 	var quitOnce sync.Once
 	quit := make(chan struct{})
@@ -275,29 +265,6 @@ func applyAutostart(core *appcore.Core, cfg *config.Config) {
 		return
 	}
 	core.Srv.Log("开机自启已启用")
-}
-
-// startClipboard 剪贴板自动翻译：复制即译
-func startClipboard(ctx context.Context, core *appcore.Core, cfg *config.Config) {
-	core.Srv.Log("剪贴板自动翻译已启用（复制即译）")
-	go func() {
-		clipboard.Watch(ctx, func(text string) {
-			core.Srv.Log("剪贴板捕获: %s", truncateRunes(text, 40))
-			done := core.Q.Submit(&queue.Job{Type: "translate", Args: &api.TranslateRequest{Text: text, Target: cfg.TargetLang}})
-			item := api.ClipItem{Time: time.Now().Format("15:04:05"), Text: truncateRunes(text, 60)}
-			switch res := (<-done).(type) {
-			case *api.TranslateResult:
-				if res.Ok {
-					item.Result = res.Text
-				} else {
-					item.Error = res.Error
-				}
-			case error:
-				item.Error = res.Error()
-			}
-			core.Srv.PushClipItem(item)
-		})
-	}()
 }
 
 // isAddrInUse 判断监听失败是否因端口被占用（Windows 的报错文案与 Unix 不同）

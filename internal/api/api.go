@@ -31,9 +31,6 @@ type Server struct {
 	logMax    int
 
 	switchFn func(modelPath string) (*BackendSwitch, error) // 运行时切换后端（appcore 注入）
-
-	clipMu      sync.Mutex
-	clipHistory []ClipItem // 剪贴板翻译历史（环形）
 }
 
 // BackendSwitch 描述一次运行时后端切换的结果
@@ -46,24 +43,6 @@ type BackendSwitch struct {
 // SetSwitchFn 注入模型切换回调（由 appcore 提供，实现按模型类型自动路由后端）
 func (s *Server) SetSwitchFn(fn func(modelPath string) (*BackendSwitch, error)) {
 	s.switchFn = fn
-}
-
-// ClipItem 剪贴板翻译记录
-type ClipItem struct {
-	Time   string `json:"time"`
-	Text   string `json:"text"`
-	Result string `json:"result,omitempty"`
-	Error  string `json:"error,omitempty"`
-}
-
-// PushClipItem 追加一条剪贴板翻译记录（保留最近 20 条）
-func (s *Server) PushClipItem(item ClipItem) {
-	s.clipMu.Lock()
-	defer s.clipMu.Unlock()
-	s.clipHistory = append(s.clipHistory, item)
-	if len(s.clipHistory) > 20 {
-		s.clipHistory = s.clipHistory[len(s.clipHistory)-20:]
-	}
 }
 
 // New 创建 API 服务
@@ -95,7 +74,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/translate/stream", s.handleTranslateStream)
 	mux.HandleFunc("/languages", s.handleLanguages)
 	mux.HandleFunc("/models", s.handleModels)
-	mux.HandleFunc("/clipboard", s.handleClipboard)
 	mux.HandleFunc("/config", s.handleConfig)
 	mux.HandleFunc("/logs", s.handleLogs)
 	mux.HandleFunc("/", s.handleWeb)
@@ -366,14 +344,6 @@ func (s *Server) handleLanguages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, Languages)
 }
 
-// handleClipboard 返回剪贴板自动翻译历史（供 Web 轮询提示）
-func (s *Server) handleClipboard(w http.ResponseWriter, r *http.Request) {
-	s.clipMu.Lock()
-	items := append([]ClipItem{}, s.clipHistory...)
-	s.clipMu.Unlock()
-	writeJSON(w, 200, map[string]any{"items": items})
-}
-
 // handleModels 列出 models 目录下的 GGUF 模型文件（供 Web 下拉选择/刷新）
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"models": listModels()})
@@ -413,21 +383,20 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, s.cfg)
 	case http.MethodPut:
 		var patch struct {
-			APIPort          *int    `json:"api_port"`
-			EnginePort       *int    `json:"engine_port"`
-			ModelPath        *string `json:"model_path"`
-			EnginePath       *string `json:"engine_path"`
-			TargetLang       *string `json:"target_lang"`
-			SaveMemory       *bool   `json:"save_memory"`
-			ClipboardEnabled *bool   `json:"clipboard_enabled"`
-			Autostart        *bool   `json:"autostart"`
-			NCTX             *int    `json:"n_ctx"`
-			NGL              *int    `json:"ngl"`
-			Token            *string `json:"token"`
-			Backend          *string `json:"backend"`
-			OpenAIBaseURL    *string `json:"openai_base_url"`
-			OpenAIKey        *string `json:"openai_key"`
-			OpenAIModel      *string `json:"openai_model"`
+			APIPort       *int    `json:"api_port"`
+			EnginePort    *int    `json:"engine_port"`
+			ModelPath     *string `json:"model_path"`
+			EnginePath    *string `json:"engine_path"`
+			TargetLang    *string `json:"target_lang"`
+			SaveMemory    *bool   `json:"save_memory"`
+			Autostart     *bool   `json:"autostart"`
+			NCTX          *int    `json:"n_ctx"`
+			NGL           *int    `json:"ngl"`
+			Token         *string `json:"token"`
+			Backend       *string `json:"backend"`
+			OpenAIBaseURL *string `json:"openai_base_url"`
+			OpenAIKey     *string `json:"openai_key"`
+			OpenAIModel   *string `json:"openai_model"`
 		}
 		if err := readJSON(r, &patch); err != nil {
 			writeJSON(w, 400, map[string]string{"error": err.Error()})
@@ -452,9 +421,6 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.SaveMemory != nil {
 			s.cfg.SaveMemory = *patch.SaveMemory
-		}
-		if patch.ClipboardEnabled != nil {
-			s.cfg.ClipboardEnabled = *patch.ClipboardEnabled
 		}
 		if patch.Autostart != nil {
 			s.cfg.Autostart = *patch.Autostart
