@@ -474,11 +474,30 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     if(latin > 0 && latin >= noSpace.length * 0.5) return '英文';
     return '其他';
   }
+  /* 自动目标语言（仅当「原文语言=自动」时生效）：
+     前 200 字检测为中文 → 译英文；检测为英文/日文/韩文/其他 → 译中文。
+     每次输入都会重新判定并同步目标语言下拉框，徽章会显示"检测：X → 译为 Y"；
+     用户显式选择了源语言时不干预（此时完全跟随下拉框）。 */
+  function applyAutoTarget(lang){
+    if(!lang) return;
+    const want = lang === '中文' ? 'en' : 'zh';
+    const dst = $('#dstLang');
+    if(dst.value !== want){
+      dst.value = want;
+      updateQuickActive();
+    }
+  }
+  function dstLabel(){
+    const o = $('#dstLang').selectedOptions[0];
+    return o ? o.textContent.split(' (')[0] : '';
+  }
   function updateDetect(){
     const badge = $('#detectBadge');
     const auto = $('#srcLang').value === '';
-    const lang = auto ? detectLang(srcText.value) : '';
-    badge.textContent = lang ? '检测：' + lang : '';
+    const head = srcText.value.slice(0, 200);        // 只看前 200 字（前 n 个字）
+    const lang = auto && head.trim() ? detectLang(head) : '';
+    if(auto) applyAutoTarget(lang);
+    badge.textContent = lang ? '检测：' + lang + ' → 译为' + dstLabel() : '';
     badge.style.display = lang ? '' : 'none';
   }
   srcText.addEventListener('input', () => {
