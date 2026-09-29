@@ -130,6 +130,11 @@ func (c *Core) SwitchModel(modelPath string) (*api.BackendSwitch, error) {
 		c.Completer = h
 		return &api.BackendSwitch{Backend: "hymt", Completer: h}, nil
 	}
+	// 先停旧引擎再启新：新旧 llama-server 用同一个 EnginePort，
+	// 先启后停会让新进程绑定失败（旧进程还占着端口）
+	if c.Eng != nil {
+		_ = c.Eng.Stop()
+	}
 	eng := engine.New(&engine.Config{
 		EnginePort: c.cfg.EnginePort,
 		ModelPath:  modelPath,
@@ -140,9 +145,6 @@ func (c *Core) SwitchModel(modelPath string) (*api.BackendSwitch, error) {
 	})
 	if err := eng.Start(context.Background()); err != nil {
 		return nil, fmt.Errorf("启动引擎失败: %w", err)
-	}
-	if c.Eng != nil {
-		_ = c.Eng.Stop()
 	}
 	c.Eng = eng
 	c.Completer = eng

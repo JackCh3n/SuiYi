@@ -22,7 +22,6 @@ type Config struct {
 	OpenAIBaseURL string `json:"openai_base_url"` // OpenAI 兼容 API 基地址（含 /v1）
 	OpenAIKey     string `json:"openai_key"`      // OpenAI 兼容 API Key
 	OpenAIModel   string `json:"openai_model"`    // OpenAI 兼容 API 模型名
-	Headless      bool   `json:"-"`               // 无托盘模式（运行时决定，不持久化）
 }
 
 // Defaults 返回带默认值的配置

@@ -144,7 +144,6 @@ func run(o appOptions) int {
 	if o.ngl != 0 {
 		cfg.NGL = o.ngl
 	}
-	cfg.Headless = !o.tray
 
 	webURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.APIPort)
 	fmt.Printf("随译 SuiYi v%s · 推理后端 %s · 模型 %s\n", version, cfg.Backend, config.Resolve(cfg.ModelPath))

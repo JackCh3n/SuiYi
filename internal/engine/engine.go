@@ -25,6 +25,8 @@ type Engine struct {
 	cmd        *exec.Cmd
 	mu         sync.Mutex
 	started    bool
+	exited     bool // 子进程已退出并收割（reap 在锁内写入，避免与 ProcessState 数据竞争）
+	stopping   bool // 正在停止：守候协程直接退出、restart 拒绝执行（否则退出应用时会复活引擎）
 	logFile    *os.File
 	restarting bool
 	switching  bool // 正在切换模型：期间禁止 waitHealthy 自动重启
@@ -104,6 +106,8 @@ func (e *Engine) Start(ctx context.Context) error {
 		return fmt.Errorf("启动 llama-server 失败: %w", err)
 	}
 	e.started = true
+	e.exited = false                       // 新进程：清掉上一轮的退出标记
+	e.stopping = false                     // SetModel 会先 Stop 再 Start，这里解除停止态
 	e.readyOnce = sync.Once{}              // 每次启动重置，允许重建就绪通道
 	e.ready = make(chan struct{})          // 每次启动重建就绪通道
 	go e.reap()                            // 收割进程：进程退出后填充 ProcessState，供退出检测
@@ -113,9 +117,16 @@ func (e *Engine) Start(ctx context.Context) error {
 
 // reap 等待子进程退出并填充 ProcessState（供 waitHealthy/SetModel 检测进程退出）
 func (e *Engine) reap() {
-	if e.cmd != nil && e.cmd.Process != nil {
-		_ = e.cmd.Wait()
+	e.mu.Lock()
+	cmd := e.cmd // 快照：Start 换新 cmd 后，老 reap 仍收割老进程
+	e.mu.Unlock()
+	if cmd == nil || cmd.Process == nil {
+		return
 	}
+	_ = cmd.Wait() // 收割，此后 cmd.ProcessState 可安全读取
+	e.mu.Lock()
+	e.exited = true
+	e.mu.Unlock()
 }
 
 // SetModel 切换本地引擎模型：停旧引擎 → 用新模型启动 → 等待就绪；失败自动回退旧模型
@@ -154,7 +165,7 @@ func (e *Engine) SetModel(modelPath string) error {
 			return nil
 		}
 		e.mu.Lock()
-		exited := e.started && e.cmd != nil && e.cmd.ProcessState != nil && e.cmd.ProcessState.Exited()
+		exited := e.started && e.exited
 		e.mu.Unlock()
 		if exited {
 			e.revertModel(old)
@@ -211,7 +222,11 @@ func (e *Engine) waitHealthy(ctx context.Context) {
 		case <-tick.C:
 			e.mu.Lock()
 			switching := e.switching
+			stopping := e.stopping
 			e.mu.Unlock()
+			if stopping {
+				return // 应用正在退出（Stop 已杀进程），不要再把引擎拉起来
+			}
 			if time.Now().After(deadline) {
 				if switching {
 					return // 切换中由 SetModel 负责处理
@@ -245,17 +260,14 @@ func (e *Engine) waitHealthy(ctx context.Context) {
 func (e *Engine) processExited() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.started && e.cmd != nil && e.cmd.ProcessState != nil && e.cmd.ProcessState.Exited()
+	return e.started && e.exited
 }
 
 // Running 引擎子进程是否仍在运行；就绪后进程意外退出时，健康检查据此返回不可用
 func (e *Engine) Running() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.cmd == nil || e.cmd.Process == nil {
-		return false
-	}
-	return e.cmd.ProcessState == nil || !e.cmd.ProcessState.Exited()
+	return e.started && !e.exited
 }
 
 // Ready 返回就绪通知
@@ -343,11 +355,19 @@ func (e *Engine) Stop() error {
 		e.logFile = nil
 	}
 	e.started = false
+	e.stopping = true // 守候协程见到即退出，restart 拒绝执行（应用退出时不能复活引擎）
 	return nil
 }
 
 // restart 重启引擎（崩溃恢复）
 func (e *Engine) restart(reason string) {
+	e.mu.Lock()
+	stopping := e.stopping
+	e.mu.Unlock()
+	if stopping {
+		log.Printf("[engine] %s，但应用正在退出，跳过重启", reason)
+		return
+	}
 	log.Printf("[engine] %s，尝试重启", reason)
 	e.mu.Lock()
 	if e.restarting {
