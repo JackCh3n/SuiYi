@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -53,13 +54,14 @@ var hunyuanLangFix = map[string]string{"zh-Hant": "zh-TW"}
 
 // Hunyuan 混元翻译客户端
 type Hunyuan struct {
-	userID   string // X-ID（空=匿名）
-	token    string // X-Token（空=匿名）
+	anonMode bool   // 匿名模式：构造时未配置账号凭证（此模式下 401 会自动重登）
+	userID   string // 当前生效的 X-ID（账号配置的，或匿名登录得到的 a_…）
+	token    string // 当前生效的 X-Token
 	deviceID string // 匿名登录用设备号（同一设备固定，保证身份稳定）
 
 	mu      sync.Mutex // 保护凭证（匿名登录/401 重登时更新）
 	client  *http.Client
-	anonTry int // 匿名登录重试计数（避免 401 死循环）
+	anonTry int // 匿名重登计数（避免 401 死循环）
 }
 
 // NewHunyuan 创建混元后端；userID/token 留空则首次调用时自动匿名登录
@@ -67,9 +69,11 @@ func NewHunyuan(userID, token, deviceID string) *Hunyuan {
 	if strings.TrimSpace(deviceID) == "" {
 		deviceID = newUUID()
 	}
+	uid, tok := strings.TrimSpace(userID), strings.TrimSpace(token)
 	return &Hunyuan{
-		userID:   strings.TrimSpace(userID),
-		token:    strings.TrimSpace(token),
+		anonMode: uid == "" || tok == "",
+		userID:   uid,
+		token:    tok,
 		deviceID: strings.TrimSpace(deviceID),
 		client:   &http.Client{},
 	}
@@ -78,8 +82,10 @@ func NewHunyuan(userID, token, deviceID string) *Hunyuan {
 // DeviceID 返回本实例使用的设备号（供上层持久化，保证匿名身份稳定）
 func (h *Hunyuan) DeviceID() string { return h.deviceID }
 
-// Anonymous 是否走匿名身份（未配置账号凭证）
-func (h *Hunyuan) Anonymous() bool { return h.userID == "" || h.token == "" }
+// Anonymous 是否为匿名身份。
+// 注意：必须看构造时定下的 anonMode，不能看"当前凭证是否为空"——
+// 匿名登录成功后就持有了 a_… 凭证，那样判断会变成"非匿名"，401 时就不会自动重登了。
+func (h *Hunyuan) Anonymous() bool { return h.anonMode }
 
 // translateReq 翻译请求体
 type translateReq struct {
@@ -249,14 +255,15 @@ func (h *Hunyuan) do(ctx context.Context, text, source, target, glossary, style 
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 401 && h.Anonymous() {
-		// 匿名 token 失效：重新登录一次再试（自愈）
+	if resp.StatusCode == 401 && h.anonMode {
+		// 匿名凭证失效（服务端未声明匿名 token 有效期，实测会失效）：丢弃后重新匿名登录再试一次
 		h.mu.Lock()
 		retry := h.anonTry < 2
 		h.anonTry++
 		h.userID, h.token = "", ""
 		h.mu.Unlock()
 		if retry {
+			log.Printf("[hunyuan] 匿名凭证失效(401)，已重新匿名登录")
 			return h.do(ctx, text, source, target, glossary, style, stream, emit)
 		}
 	}
