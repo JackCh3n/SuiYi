@@ -114,6 +114,9 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
 .prog-bar{flex:1;height:6px;background:var(--bg);border:1px solid var(--border);border-radius:6px;overflow:hidden}
 .prog-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--primary),#00b42a);transition:width .3s}
 .prog-text{font-size:12px;color:var(--sub);white-space:nowrap;min-width:150px;text-align:right}
+.prog-stats{font-size:12px;color:var(--sub);margin:-8px 0 14px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.prog-stats b{color:var(--text);font-weight:600}
+.prog-stats .sep{color:var(--border)}
 @media(max-width:760px){.panes{flex-direction:column}.pane-box textarea,.pane-box .out{min-height:160px}}
 @media(max-width:640px){.wrap{padding:14px}.header{padding:12px 16px}.right .pill{display:none}}
 </style>
@@ -163,6 +166,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
         <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
         <span class="prog-text" id="progText"></span>
       </div>
+      <div class="prog-stats" id="progStats" style="display:none"></div>
       <div class="panes">
         <div class="pane-box">
           <div class="pane-head">
@@ -385,10 +389,52 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     for(const l of langs) if(l.code === code) return l.zh;
     return code;
   };
+  /* 翻译速度统计：按 500ms 窗口采样瞬时速度，用于 max/avg/min；
+     单位是「字符/秒」——与后端一致（CJK≈1 token/字，英文按字符略偏高，仅作参考）。 */
+  let statT0 = 0, statChars = 0, statSamples = [], statLastT = 0, statLastChars = 0;
+  const statReset = () => {
+    statT0 = statLastT = performance.now();
+    statChars = statLastChars = 0;
+    statSamples = [];
+    $('#progStats').style.display = 'none';
+    $('#progStats').textContent = '';
+  };
+  const statAdd = chunk => {
+    statChars += Array.from(chunk).length;
+    const now = performance.now(), dt = now - statLastT;
+    if(dt >= 500){
+      const dn = statChars - statLastChars;
+      if(dn > 0) statSamples.push(dn / (dt / 1000));
+      statLastT = now; statLastChars = statChars;
+    }
+  };
+  const statFinish = () => {
+    const now = performance.now();
+    const elapsed = Math.max((now - statT0) / 1000, 0.001);
+    const dt = now - statLastT, dn = statChars - statLastChars;
+    if(dt >= 200 && dn > 0) statSamples.push(dn / (dt / 1000)); // 收尾的零头窗口
+    const samples = statSamples.filter(x => x > 0);
+    const avg = statChars / elapsed;
+    return { elapsed, avg, max: samples.length ? Math.max(...samples) : avg,
+             min: samples.length ? Math.min(...samples) : avg, samples: samples.length };
+  };
+  const statRender = st => {
+    const f = x => (x || 0).toFixed(1);
+    const el = $('#progStats');
+    el.innerHTML = '<span>共计耗时 <b>' + st.elapsed.toFixed(1) + 's</b></span>' +
+      '<span class="sep">·</span><span>翻译速度 max <b>' + f(st.max) + '</b>' +
+      '<span class="sep">/</span>avg <b>' + f(st.avg) + '</b>' +
+      '<span class="sep">/</span>min <b>' + f(st.min) + '</b> token/s</span>' +
+      (st.samples < 2 ? '<span class="sep">·</span><span>样本较少，仅供参考</span>' : '');
+    el.style.display = '';
+  };
+
+  const backendLabel = () => ({
+    openai: 'OpenAI 兼容 API', hunyuan: '腾讯混元翻译', hymt: 'hy-mt 引擎'
+  })[backend] || '本地离线推理';
   const refreshAutoHint = () => {
-    $('#autoHint').textContent = backend === 'openai'
-      ? '输入后自动翻译 · 调用 OpenAI 兼容 API'
-      : '输入后自动翻译 · 数据不出本机（本地后端）';
+    $('#autoHint').textContent = '输入后自动翻译 · ' + backendLabel() +
+      (backend === 'local' || backend === 'hymt' ? '（数据不出本机）' : '');
   };
   const updateTitles = () => {
     $('#srcLang').title = '原文语言';
@@ -408,10 +454,10 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     $('#btnStop').style.display = '';
     resultText.classList.add('loading');
     resultText.textContent = '';
-    $('#progWrap').style.display = '';
+    $('#progWrap').style.display = '';   // 进度区不再自动隐藏：结束后保留速度读数与统计行
     $('#progFill').style.width = '0%';
     $('#progText').textContent = '准备中…';
-    const hideProg = () => { $('#progWrap').style.display = 'none'; };
+    statReset();
     let full = '';
     let lastTps = 0;
     try{
@@ -435,7 +481,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           if(!block.startsWith('data: ')) continue;
           let payload;
           try{ payload = JSON.parse(block.slice(6)); }catch(e){ continue; }
-          if(payload.delta){ full += payload.delta; resultText.textContent = full; }
+          if(payload.delta){ full += payload.delta; resultText.textContent = full; statAdd(payload.delta); }
           if(typeof payload.progress === 'number'){
             const pct = Math.round(payload.progress * 100);
             $('#progFill').style.width = pct + '%';
@@ -450,23 +496,26 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           }
           if(payload.error) throw new Error(payload.error);
           if(payload.done){
+            const st = statFinish();
             $('#progFill').style.width = '100%';
-            $('#progText').textContent = '完成' + (lastTps > 0 ? ' · ' + lastTps.toFixed(1) + ' token/s' : '');
-            setTimeout(hideProg, 1200);
+            $('#progText').textContent = '完成 · ' + st.avg.toFixed(1) + ' token/s';
+            statRender(st);   // 进度条下面一行：共计耗时 + max/avg/min
             $('#autoHint').textContent = (payload.source && $('#srcLang').value==='' ? '检测到 ' + langName(payload.source) + ' · ' : '') +
-              (backend === 'openai' ? 'OpenAI 兼容 API' : '本地离线推理') +
-              (lastTps > 0 ? ' · ' + lastTps.toFixed(1) + ' token/s' : '');
+              backendLabel();
           }
         }
       }
       if(!full) resultText.textContent = '（未生成内容）';
     }catch(e){
-      hideProg();
+      const st = statFinish();
       if(e.name === 'AbortError'){
-        // 用户点击停止：保留已生成的部分译文
+        // 用户点击停止：保留已生成的部分译文，并保留已测到的速度统计
         resultText.textContent = full || resultText.textContent;
+        $('#progText').textContent = '已停止 · ' + st.avg.toFixed(1) + ' token/s';
+        statRender(st);
         toast('已停止翻译');
       }else{
+        $('#progWrap').style.display = 'none';
         resultText.textContent = resultText.textContent || '错误：' + e.message;
         toast('翻译失败：' + e.message);
       }
@@ -532,6 +581,8 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   $('#clearBtn').onclick = () => {
     srcText.value = ''; $('#charCount').textContent = '';
     resultText.textContent = '译文将显示在这里';
+    $('#progWrap').style.display = 'none';
+    $('#progStats').style.display = 'none';
     updateDetect();
     clearTimeout(debounce);
     srcText.focus();
