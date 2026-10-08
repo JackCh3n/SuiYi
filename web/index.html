@@ -211,6 +211,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           <option value="local">本地 llama.cpp</option>
           <option value="hymt">hy-mt (STQ 1.25bit)</option>
           <option value="openai">OpenAI 兼容 API</option>
+          <option value="hunyuan">腾讯混元翻译（App 接口 · 免费）</option>
         </select>
       </div>
       <div id="openaiGroup">
@@ -225,6 +226,21 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
         <div class="set-row">
           <div class="set-left"><h4>模型名</h4><p>使用的模型标识，如 gpt-4o-mini、qwen-plus、deepseek-chat</p></div>
           <input type="text" class="set-input" id="cfgOpenAIModel" placeholder="gpt-4o-mini">
+        </div>
+      </div>
+      <div id="hunyuanGroup">
+        <div class="set-row">
+          <div class="set-left"><h4>X-ID（userId）</h4><p>混元翻译 App 抓包得到，形如 u_0000000000000000</p></div>
+          <input type="text" class="set-input" id="cfgHyID" placeholder="u_0000000000000000">
+        </div>
+        <div class="set-row">
+          <div class="set-left"><h4>X-Token（登录令牌）</h4><p>64 字符，仅存本机 data/config.json；会过期，过期后重新抓包替换</p></div>
+          <input type="password" class="set-input" id="cfgHyToken" placeholder="64 字符令牌">
+        </div>
+        <div class="hint" style="margin:0 0 4px">
+          非官方接口（从 App 抓包）：免费、无需 Key，但不保证长期可用，也不支持术语表/风格。
+          获取方式：手机端「腾讯混元翻译」登录后抓包 <code>/api/v1/translate</code> 请求的
+          <code>X-ID</code> 与 <code>X-Token</code> 两个请求头。
         </div>
       </div>
     </div>
@@ -290,7 +306,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   const $ = s => document.querySelector(s);
   let langs = [];
   let backend = 'local';
-  let openaiLoaded = { base: '', key: '', model: '' }; // 载入时的 OpenAI 配置（判断是否需要重启）
+  let openaiLoaded = { base: '', key: '', model: '', hyID: '', hyToken: '' }; // 载入时的远程后端配置（判断是否需要重启）
   let translating = false;
   let abortCtrl = null; // 当前翻译请求的 AbortController（停止用）
   const toast = msg => { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); };
@@ -592,7 +608,9 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
 
   /* 设置 */
   function syncOpenaiGroup(){
-    $('#openaiGroup').style.display = $('#cfgBackend').value === 'openai' ? '' : 'none';
+    const b = $('#cfgBackend').value;
+    $('#openaiGroup').style.display = b === 'openai' ? '' : 'none';
+    $('#hunyuanGroup').style.display = b === 'hunyuan' ? '' : 'none';
   }
   // 模型下拉：列出 models 目录的 .gguf，保持当前选择；保留自定义路径项
   async function loadModels(keep){
@@ -637,8 +655,11 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       $('#cfgOpenAIBase').value = d.openai_base_url || '';
       $('#cfgOpenAIKey').value = d.openai_key || '';
       $('#cfgOpenAIModel').value = d.openai_model || '';
+      $('#cfgHyID').value = d.hunyuan_user_id || '';
+      $('#cfgHyToken').value = d.hunyuan_token || '';
       // OpenAI 客户端在启动时构建（模型名/地址/Key 都固化在里面），改了必须重启才生效
-      openaiLoaded = { base: d.openai_base_url || '', key: d.openai_key || '', model: d.openai_model || '' };
+      openaiLoaded = { base: d.openai_base_url || '', key: d.openai_key || '', model: d.openai_model || '',
+                       hyID: d.hunyuan_user_id || '', hyToken: d.hunyuan_token || '' };
       syncOpenaiGroup();
       await loadModels(d.model_path);
     }catch(e){ toast('读取配置失败：' + e.message); }
@@ -655,6 +676,8 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     $('#cfgOpenAIBase').value = 'https://api.openai.com/v1';
     $('#cfgOpenAIKey').value = '';
     $('#cfgOpenAIModel').value = 'gpt-4o-mini';
+    $('#cfgHyID').value = '';
+    $('#cfgHyToken').value = '';
     loadModels('models/Hy-MT2-1.8B-Q4_K_M.gguf');
     syncOpenaiGroup();
   }
@@ -674,6 +697,8 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           openai_base_url: $('#cfgOpenAIBase').value.trim(),
           openai_key: $('#cfgOpenAIKey').value.trim(),
           openai_model: $('#cfgOpenAIModel').value.trim(),
+          hunyuan_user_id: $('#cfgHyID').value.trim(),
+          hunyuan_token: $('#cfgHyToken').value.trim(),
         })});
       const d = await r.json();
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
@@ -682,7 +707,9 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       $('#dstLang').value = $('#cfgTarget').value;
       const openaiChanged = $('#cfgOpenAIBase').value.trim() !== openaiLoaded.base
         || $('#cfgOpenAIKey').value.trim() !== openaiLoaded.key
-        || $('#cfgOpenAIModel').value.trim() !== openaiLoaded.model;
+        || $('#cfgOpenAIModel').value.trim() !== openaiLoaded.model
+        || $('#cfgHyID').value.trim() !== openaiLoaded.hyID
+        || $('#cfgHyToken').value.trim() !== openaiLoaded.hyToken;
       const needRestart = $('#cfgBackend').value !== backend || openaiChanged;
       toast('设置已保存' + (needRestart ? '（重启后生效）' : ''));
     }catch(e){

@@ -30,6 +30,9 @@ func Start(cfg *config.Config) (*Core, error) {
 
 	if cfg.Backend == "openai" {
 		c.Completer = engine.NewOpenAI(cfg.OpenAIBaseURL, cfg.OpenAIKey, cfg.OpenAIModel)
+	} else if cfg.Backend == "hunyuan" {
+		// 腾讯混元翻译 App 私有接口（免费，需 X-ID / X-Token）
+		c.Completer = engine.NewHunyuan(cfg.HunyuanUserID, cfg.HunyuanToken)
 	} else if cfg.Backend == "hymt" {
 		// hy-mt-rs CLI 后端：支持 AngelSlim 1.25bit（STQ1_0）/ 2bit（SEQ）GGUF
 		c.Completer = engine.NewHyMT(config.Resolve(cfg.ModelPath), hyMTBinPath(cfg))
@@ -80,6 +83,69 @@ func Start(cfg *config.Config) (*Core, error) {
 	c.Srv = api.New(cfg, c.Completer, c.Q)
 	c.Srv.SetSwitchFn(c.SwitchModel)
 	return c, nil
+}
+
+// translateTextNative 结构化翻译后端的一次性翻译：超长文本按段切分逐段翻译（无提示词/前文机制）
+func translateTextNative(ctx context.Context, tc engine.TextCompleter, req *api.TranslateRequest) (string, error) {
+	segs := api.SplitSegments(req.Text, maxSegRunes)
+	if len(segs) <= 1 {
+		return tc.TranslateText(ctx, req.Text, req.Source, req.Target)
+	}
+	var full strings.Builder
+	for _, seg := range segs {
+		out, err := tc.TranslateText(ctx, seg, req.Source, req.Target)
+		if err != nil {
+			return "", err
+		}
+		full.WriteString(out)
+	}
+	return full.String(), nil
+}
+
+// translateStreamNative 结构化翻译后端的流式翻译（分段 + 进度上报，与提示词路径一致）
+func translateStreamNative(ctx context.Context, tc engine.TextCompleter, req *api.TranslateRequest, emit func(string) error, progress func(pct float64, stage string, eta int, tps float64)) error {
+	segs := api.SplitSegments(req.Text, maxSegRunes)
+	total := 0
+	for _, s := range segs {
+		total += len([]rune(s))
+	}
+	if total <= 0 {
+		total = 1
+	}
+	t0 := time.Now()
+	processed := 0
+	for i, seg := range segs {
+		segRunes := len([]rune(seg))
+		stage := fmt.Sprintf("第 %d/%d 段", i+1, len(segs))
+		if progress != nil {
+			progress(float64(processed)/float64(total), stage, etaSeconds(t0, processed, total), 0)
+		}
+		emitted := 0
+		var lastProg time.Time
+		if err := tc.TranslateStream(ctx, seg, req.Source, req.Target, func(chunk string) error {
+			emitted += len([]rune(chunk))
+			if progress != nil && time.Since(lastProg) > 200*time.Millisecond {
+				local := float64(emitted) / float64(maxInt(segRunes, 1))
+				if local > 0.95 {
+					local = 0.95
+				}
+				progress((float64(processed)+local*float64(segRunes))/float64(total), stage,
+					etaSeconds(t0, processed+int(local*float64(segRunes)), total), 0)
+				lastProg = time.Now()
+			}
+			return emit(chunk)
+		}); err != nil {
+			return err
+		}
+		processed += segRunes
+		if progress != nil {
+			progress(float64(processed)/float64(total), stage, etaSeconds(t0, processed, total), 0)
+		}
+	}
+	if progress != nil {
+		progress(1, "完成", 0, 0)
+	}
+	return nil
 }
 
 // needsHyMT 判断模型是否必须走 hy-mt 后端（AngelSlim 私有量化：2bit SEQ / 1.25bit STQ，
@@ -165,10 +231,12 @@ func (c *Core) Stop() {
 const maxSegRunes = 3000
 
 // ChatReq 构造统一翻译请求（README 推荐采样参数）
-func ChatReq(prompt string) engine.ChatRequest {
+func ChatReq(prompt, source, target string) engine.ChatRequest {
 	return engine.ChatRequest{
 		Model:       "suiyi",
 		Messages:    []engine.Msg{{Role: "user", Content: prompt}},
+		SourceLang:  source,
+		TargetLang:  target,
 		Temperature: 0.7,
 		TopP:        0.6,
 		TopK:        20,
@@ -200,14 +268,18 @@ func trimTail(s string, n int) string {
 
 // TranslateText 非流式翻译：超长文本自动分段，逐段翻译并拼接（携带滚动前文）
 func TranslateText(ctx context.Context, completer engine.Completer, req *api.TranslateRequest) (string, error) {
+	// 结构化翻译后端（如混元 App 接口）：直接给原文与语言码，不走提示词
+	if tc, ok := completer.(engine.TextCompleter); ok {
+		return translateTextNative(ctx, tc, req)
+	}
 	segs := api.SplitSegments(req.Text, maxSegRunes)
 	if len(segs) <= 1 {
-		return completer.Complete(ctx, ChatReq(api.BuildPrompt(req.Text, req.Source, req.Target, req.TermGlossary, req.Style)))
+		return completer.Complete(ctx, ChatReq(api.BuildPrompt(req.Text, req.Source, req.Target, req.TermGlossary, req.Style), req.Source, req.Target))
 	}
 	var full strings.Builder
 	var prev string
 	for _, seg := range segs {
-		out, err := completer.Complete(ctx, ChatReq(buildSegPrompt(seg, req.Source, req.Target, req.TermGlossary, req.Style, prev)))
+		out, err := completer.Complete(ctx, ChatReq(buildSegPrompt(seg, req.Source, req.Target, req.TermGlossary, req.Style, prev), req.Source, req.Target))
 		if err != nil {
 			return "", err
 		}
@@ -220,6 +292,10 @@ func TranslateText(ctx context.Context, completer engine.Completer, req *api.Tra
 // TranslateStream 流式翻译：超长文本自动分段，逐段流式输出（携带滚动前文）
 // progress 回调上报：pct 0~1、段数、预计剩余秒数、生成速度 token/s
 func TranslateStream(ctx context.Context, streamer engine.StreamCompleter, req *api.TranslateRequest, emit func(string) error, progress func(pct float64, stage string, eta int, tps float64)) error {
+	// 结构化翻译后端（如混元 App 接口）：直接给原文与语言码，不走提示词
+	if tc, ok := streamer.(engine.TextCompleter); ok {
+		return translateStreamNative(ctx, tc, req, emit, progress)
+	}
 	segs := api.SplitSegments(req.Text, maxSegRunes)
 	total := 0
 	for _, s := range segs {
@@ -242,7 +318,7 @@ func TranslateStream(ctx context.Context, streamer engine.StreamCompleter, req *
 		var out strings.Builder
 		emitted := 0
 		var lastProg time.Time
-		tokens, err := streamer.CompleteStream(ctx, ChatReq(buildSegPrompt(seg, req.Source, req.Target, req.TermGlossary, req.Style, prev)), func(chunk string) error {
+		tokens, err := streamer.CompleteStream(ctx, ChatReq(buildSegPrompt(seg, req.Source, req.Target, req.TermGlossary, req.Style, prev), req.Source, req.Target), func(chunk string) error {
 			out.WriteString(chunk)
 			emitted += len([]rune(chunk))
 			// 段内进度：估算本段译文长度 ≈ 原文长度；200ms 节流推送

@@ -396,6 +396,8 @@ type ChatRequest struct {
 	TopK        int     `json:"top_k,omitempty"`
 	MaxTokens   int     `json:"max_tokens,omitempty"`
 	Stream      bool    `json:"stream,omitempty"`
+	SourceLang  string  `json:"-"` // 结构化翻译后端（如混元）用：源语言码，不参与序列化
+	TargetLang  string  `json:"-"` // 同上：目标语言码
 }
 
 // Msg 消息

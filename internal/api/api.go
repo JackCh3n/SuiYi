@@ -139,6 +139,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Backend == "openai" {
 		// OpenAI 兼容后端：有配置即视为可用
 		resp["engine"] = s.cfg.OpenAIBaseURL != ""
+	} else if s.cfg.Backend == "hunyuan" {
+		// 混元翻译 App 接口：填了 X-ID 与 X-Token 即视为可用
+		resp["engine"] = s.cfg.HunyuanUserID != "" && s.cfg.HunyuanToken != ""
 	} else if s.cfg.Backend == "hymt" {
 		// hy-mt CLI 后端：可执行文件与模型存在即视为可用（无常驻进程）
 		_, statBin := os.Stat(config.Resolve(s.cfg.EnginePath))
@@ -397,6 +400,8 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			OpenAIBaseURL *string `json:"openai_base_url"`
 			OpenAIKey     *string `json:"openai_key"`
 			OpenAIModel   *string `json:"openai_model"`
+			HunyuanUserID *string `json:"hunyuan_user_id"`
+			HunyuanToken  *string `json:"hunyuan_token"`
 		}
 		if err := readJSON(r, &patch); err != nil {
 			writeJSON(w, 400, map[string]string{"error": err.Error()})
@@ -445,6 +450,12 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.OpenAIModel != nil {
 			s.cfg.OpenAIModel = *patch.OpenAIModel
+		}
+		if patch.HunyuanUserID != nil {
+			s.cfg.HunyuanUserID = strings.TrimSpace(*patch.HunyuanUserID)
+		}
+		if patch.HunyuanToken != nil {
+			s.cfg.HunyuanToken = strings.TrimSpace(*patch.HunyuanToken)
 		}
 		if err := s.cfg.Save(); err != nil {
 			writeJSON(w, 500, map[string]string{"error": "保存配置失败: " + err.Error()})

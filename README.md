@@ -26,6 +26,7 @@
 - **多后端**：
   - `local`（默认）：本地 llama.cpp（llama-server 子进程），完全离线
   - `hymt`：hy-mt-rs 引擎，支持 AngelSlim 官方 **1.25bit（STQ1_0）** 与 **2bit（SEQ）** GGUF（体积小、省内存）
+  - `hunyuan`：腾讯混元翻译 App 私有接口（**免费**，只需 X-ID / X-Token，见下）
   - 模型切换时**按文件类型自动路由后端**（2bit/1.25bit → `hymt`，其余 → 本地 llama-server）
   - `openai`：任意 OpenAI 兼容 API（OpenAI / 通义 / DeepSeek / 本地自建等）
 - **模型下拉切换**：把 `.gguf` 放入 `models/` 目录，Web 设置页下拉选择并「刷新」
@@ -169,6 +170,24 @@ build\suiyi.exe translate "你好世界" -t en
 
 ---
 
+## 腾讯混元翻译后端（免费）
+
+设置页「推理后端」选 **腾讯混元翻译（App 接口 · 免费）**，填两个请求头值即可：
+
+| 字段 | 来源 |
+|---|---|
+| `X-ID` | 手机端「腾讯混元翻译」App 的 `userId`（16 位，如 `u_0000000000000000`） |
+| `X-Token` | 同一 App 的登录令牌（64 字符） |
+
+获取方式：手机 App 登录后抓包（Proxyman / ProxyPin / Charles 均可），看
+`POST https://translate.hunyuan.tencent.com/api/v1/translate` 请求里的 `X-ID`、`X-Token` 两个头。
+凭证只保存在本机 `data/config.json`，改完需重启服务生效。
+
+> ⚠️ 这是**非官方接口**（从 App 抓包得到，本机实测可用）：免费、无需 Key，
+> 但**不保证长期可用**，令牌会过期（重新抓包替换即可），请勿外传令牌；
+> 该接口是专用翻译接口，**不支持术语表与风格**；超长文本按 3000 字自动分段逐段翻译。
+> 另外它对「同一句话重复几百遍」这类退化输入会自己复读，属于远端模型行为。
+
 ## 本地 API
 
 | 接口 | 方法 | 说明 |
@@ -228,7 +247,8 @@ suiyi/
 │   │   ├── app_windows.go     #   Wails 绑定（版本/API 地址/显示隐藏/打开目录）
 │   │   └── frontend/index.html #  窗口首页（重定向到本地 Web 界面）
 │   ├── tray/                  # 系统托盘（纯 Win32：左键显示主窗口 / 右键菜单）
-│   ├── engine/                # llama-server 子进程管理 + OpenAI 兼容客户端
+│   ├── engine/                # 推理后端：llama-server / OpenAI 兼容 / hy-mt / 混元翻译
+│   │   ├── hunyuan.go         #   腾讯混元翻译 App 接口（免费，X-ID + X-Token）
 │   │   └── proc_windows.go    #   子进程后台拉起（CREATE_NO_WINDOW，不弹黑窗口）
 │   ├── api/                   # REST API + Web 静态资源(embed)
 │   ├── queue/                 # 翻译队列（串行）

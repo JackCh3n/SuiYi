@@ -22,6 +22,8 @@ type Config struct {
 	OpenAIBaseURL string `json:"openai_base_url"` // OpenAI 兼容 API 基地址（含 /v1）
 	OpenAIKey     string `json:"openai_key"`      // OpenAI 兼容 API Key
 	OpenAIModel   string `json:"openai_model"`    // OpenAI 兼容 API 模型名
+	HunyuanUserID string `json:"hunyuan_user_id"` // 混元翻译 App 接口：X-ID
+	HunyuanToken  string `json:"hunyuan_token"`   // 混元翻译 App 接口：X-Token（会过期，重新抓包替换）
 }
 
 // Defaults 返回带默认值的配置
