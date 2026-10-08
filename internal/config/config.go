@@ -8,22 +8,23 @@ import (
 
 // Config 应用配置（内存缓存 + data/config.json 持久化）
 type Config struct {
-	APIPort       int    `json:"api_port"`        // Web/API 端口
-	EnginePort    int    `json:"engine_port"`     // llama-server 推理端口
-	ModelPath     string `json:"model_path"`      // 模型文件路径
-	EnginePath    string `json:"engine_path"`     // llama-server 可执行文件路径
-	TargetLang    string `json:"target_lang"`     // 默认目标语言代码
-	SaveMemory    bool   `json:"save_memory"`     // 省内存模式（按需加载）
-	Autostart     bool   `json:"autostart"`       // 开机自启（Windows 注册表 Run 键）
-	NCTX          int    `json:"n_ctx"`           // 推理上下文长度（长文本需加大）
-	NGL           int    `json:"ngl"`             // GPU 层数（0=纯 CPU；Vulkan 版可设 99 全量 GPU）
-	Token         string `json:"token"`           // 可选鉴权 token（空=不鉴权）
-	Backend       string `json:"backend"`         // "local"（本地 llama）或 "openai"（OpenAI 兼容 API）
-	OpenAIBaseURL string `json:"openai_base_url"` // OpenAI 兼容 API 基地址（含 /v1）
-	OpenAIKey     string `json:"openai_key"`      // OpenAI 兼容 API Key
-	OpenAIModel   string `json:"openai_model"`    // OpenAI 兼容 API 模型名
-	HunyuanUserID string `json:"hunyuan_user_id"` // 混元翻译 App 接口：X-ID
-	HunyuanToken  string `json:"hunyuan_token"`   // 混元翻译 App 接口：X-Token（会过期，重新抓包替换）
+	APIPort         int    `json:"api_port"`          // Web/API 端口
+	EnginePort      int    `json:"engine_port"`       // llama-server 推理端口
+	ModelPath       string `json:"model_path"`        // 模型文件路径
+	EnginePath      string `json:"engine_path"`       // llama-server 可执行文件路径
+	TargetLang      string `json:"target_lang"`       // 默认目标语言代码
+	SaveMemory      bool   `json:"save_memory"`       // 省内存模式（按需加载）
+	Autostart       bool   `json:"autostart"`         // 开机自启（Windows 注册表 Run 键）
+	NCTX            int    `json:"n_ctx"`             // 推理上下文长度（长文本需加大）
+	NGL             int    `json:"ngl"`               // GPU 层数（0=纯 CPU；Vulkan 版可设 99 全量 GPU）
+	Token           string `json:"token"`             // 可选鉴权 token（空=不鉴权）
+	Backend         string `json:"backend"`           // "local"（本地 llama）或 "openai"（OpenAI 兼容 API）
+	OpenAIBaseURL   string `json:"openai_base_url"`   // OpenAI 兼容 API 基地址（含 /v1）
+	OpenAIKey       string `json:"openai_key"`        // OpenAI 兼容 API Key
+	OpenAIModel     string `json:"openai_model"`      // OpenAI 兼容 API 模型名
+	HunyuanUserID   string `json:"hunyuan_user_id"`   // 混元翻译 App 接口：X-ID
+	HunyuanToken    string `json:"hunyuan_token"`     // 混元翻译 App 接口：X-Token（会过期，重新抓包替换）
+	HunyuanDeviceID string `json:"hunyuan_device_id"` // 混元匿名身份的设备号（自动生成，勿改）
 }
 
 // Defaults 返回带默认值的配置

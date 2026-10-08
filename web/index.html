@@ -230,17 +230,22 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       </div>
       <div id="hunyuanGroup">
         <div class="set-row">
-          <div class="set-left"><h4>X-ID（userId）</h4><p>混元翻译 App 抓包得到，形如 u_0000000000000000</p></div>
-          <input type="text" class="set-input" id="cfgHyID" placeholder="u_0000000000000000">
+          <div class="set-left"><h4>X-ID（userId）· 可留空</h4><p>留空即自动匿名登录（无需账号）；填 App 抓包的 userId 则用你的账号（译文进 App 历史）</p></div>
+          <input type="text" class="set-input" id="cfgHyID" placeholder="留空 = 自动匿名（a_…）">
         </div>
         <div class="set-row">
-          <div class="set-left"><h4>X-Token（登录令牌）</h4><p>64 字符，仅存本机 data/config.json；会过期，过期后重新抓包替换</p></div>
-          <input type="password" class="set-input" id="cfgHyToken" placeholder="64 字符令牌">
+          <div class="set-left"><h4>X-Token（登录令牌）· 可留空</h4><p>仅存本机 data/config.json；账号令牌约 30 天过期（纯 API 调用不自动续期），过期后重新抓包替换</p></div>
+          <input type="password" class="set-input" id="cfgHyToken" placeholder="留空 = 自动匿名">
         </div>
         <div class="hint" style="margin:0 0 4px">
-          非官方接口（从 App 抓包）：免费、无需 Key，但不保证长期可用，也不支持术语表/风格。
-          获取方式：手机端「腾讯混元翻译」登录后抓包 <code>/api/v1/translate</code> 请求的
-          <code>X-ID</code> 与 <code>X-Token</code> 两个请求头。
+          <b>零配置可用</b>：两个字段都留空时，程序会用本机设备号调
+          <code>/api/login/anon</code> 换一个匿名账号（接口官方支持，不涉及你的个人账号）。
+          想用账号身份再填 <code>X-ID</code>/<code>X-Token</code>（抓包
+          <code>/api/v1/translate</code> 请求头即可）。<br>
+          该接口单次上限 5000 字（本程序按 3000 字自动分段）；风格支持 9 种固定值
+          （<code>default</code> / <code>daily_spoken</code> / <code>business_formal</code> 等，
+          其它自由文本会作为自定义提示词 <code>user_prompts</code> 传递）；术语表也走
+          <code>user_prompts</code>。
         </div>
       </div>
     </div>

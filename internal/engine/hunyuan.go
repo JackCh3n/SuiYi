@@ -1,149 +1,296 @@
 package engine
 
-// 腾讯混元翻译（translate.hunyuan.tencent.com）App 私有接口后端。
+// 腾讯混元翻译（translate.hunyuan.tencent.com）App 接口后端。
 //
-// 来源：对「腾讯混元翻译」App（Hy/1.2.2）抓包得到的接口，请求只需两个请求头：
+// 来源：对「腾讯混元翻译」App（Hy/1.2.2）抓包还原，见项目 README 与
+// 「混元翻译接口文档.md」。关键结论（2026-10-08 实测）：
 //
-//	X-ID:    userId（/api/v1/user/info 里的 userId）
-//	X-Token: 登录令牌（64 字符）
+//   - 完全不带凭证 → 401 {"error":{"code":"999","message":"X-ID is empty"}}
+//   - POST /api/login/anon {"deviceId":"<uuid>"} → {"userId":"a_…","token":"…","isAnon":true}
+//     **匿名账号**，同一 deviceId 重复登录得到同一身份；因此本后端可以零配置直接使用
+//   - 翻译接口 POST /api/v1/translate：stream=false 返回 JSON（translated_text），
+//     stream=true 返回 OpenAI 风格 SSE（choices[0].delta.content）
+//   - 上限 5000 字符/次（本后端按 3000 字自动分段，天然满足）
+//   - style 是 9 项严格白名单（传错 400），自由文本风格/术语表改走 user_prompts
 //
-// 响应是 OpenAI 风格 SSE（choices[0].delta.content），因此复用 parseSSE。
-//
-// ⚠️ 非官方接口，请注意：
-//   - 令牌会过期（过期后重新抓包替换即可），且请勿外传；
-//   - 接口随时可能变更或加限流，不适合作为唯一依赖；
-//   - 不支持术语表/风格（style 只接受固定枚举，传错会 400，故不转发用户的自由文本风格）。
-//
-// 与本地/OpenAI 后端不同，这是「专用翻译接口」：直接吃原文 + 源/目标语言码，
-// 因此 appcore 会优先走 TextCompleter 分支（避免把提示词当正文翻译）。
+// 凭证优先级：填了 X-ID + X-Token 就用账号身份（译文进 App 历史）；留空则自动匿名登录。
 
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
-// TextCompleter 直接接收「原文 + 源/目标语言码」的翻译后端。
-// appcore 在调用前判断 Completer 是否实现本接口，实现则走原生字段。
+// TextCompleter 直接接收「原文 + 语言码 + 术语表/风格」的翻译后端。
+// appcore 在调用前判断 Completer 是否实现本接口，实现则走原生字段（不拼提示词）。
 type TextCompleter interface {
-	TranslateText(ctx context.Context, text, source, target string) (string, error)
-	TranslateStream(ctx context.Context, text, source, target string, emit func(string) error) error
+	TranslateText(ctx context.Context, text, source, target, glossary, style string) (string, error)
+	TranslateStream(ctx context.Context, text, source, target, glossary, style string, emit func(string) error) error
 }
 
-const hunyuanEndpoint = "https://translate.hunyuan.tencent.com/api/v1/translate"
+const (
+	hunyuanBase      = "https://translate.hunyuan.tencent.com"
+	hunyuanTranslate = hunyuanBase + "/api/v1/translate"
+	hunyuanAnonLogin = hunyuanBase + "/api/login/anon"
+)
 
-// Hunyuan 混元翻译 App 接口客户端
+// hunyuanStyles 官方风格白名单（/api/v1/config 的 translation_styles）
+var hunyuanStyles = map[string]bool{
+	"default": true, "daily_spoken": true, "academic_paper": true, "popular_science": true,
+	"business_formal": true, "news_report": true, "promotion_copy": true, "novel": true,
+	"legal_contract": true,
+}
+
+// hunyuanLangFix 我们的语言码 → 接口语言码（接口用 zh-TW，不认 zh-Hant）
+var hunyuanLangFix = map[string]string{"zh-Hant": "zh-TW"}
+
+// Hunyuan 混元翻译客户端
 type Hunyuan struct {
-	userID string // X-ID
-	token  string // X-Token
-	client *http.Client
+	userID   string // X-ID（空=匿名）
+	token    string // X-Token（空=匿名）
+	deviceID string // 匿名登录用设备号（同一设备固定，保证身份稳定）
+
+	mu      sync.Mutex // 保护凭证（匿名登录/401 重登时更新）
+	client  *http.Client
+	anonTry int // 匿名登录重试计数（避免 401 死循环）
 }
 
-// NewHunyuan 创建混元翻译后端（userID/token 为空则调用时直接报错）
-func NewHunyuan(userID, token string) *Hunyuan {
+// NewHunyuan 创建混元后端；userID/token 留空则首次调用时自动匿名登录
+func NewHunyuan(userID, token, deviceID string) *Hunyuan {
+	if strings.TrimSpace(deviceID) == "" {
+		deviceID = newUUID()
+	}
 	return &Hunyuan{
-		userID: strings.TrimSpace(userID),
-		token:  strings.TrimSpace(token),
-		client: &http.Client{},
+		userID:   strings.TrimSpace(userID),
+		token:    strings.TrimSpace(token),
+		deviceID: strings.TrimSpace(deviceID),
+		client:   &http.Client{},
 	}
 }
 
-// requestBody 混元翻译请求体
-type hunyuanReq struct {
+// DeviceID 返回本实例使用的设备号（供上层持久化，保证匿名身份稳定）
+func (h *Hunyuan) DeviceID() string { return h.deviceID }
+
+// Anonymous 是否走匿名身份（未配置账号凭证）
+func (h *Hunyuan) Anonymous() bool { return h.userID == "" || h.token == "" }
+
+// translateReq 翻译请求体
+type translateReq struct {
 	SourceText     string `json:"source_text"`
-	SourceLanguage string `json:"source_language"`
+	SourceLanguage string `json:"source_language,omitempty"`
 	TargetLanguage string `json:"target_language"`
-	InferenceMode  string `json:"inference_mode"`
+	InferenceMode  string `json:"inference_mode,omitempty"`
 	Stream         bool   `json:"stream"`
-	RecordID       string `json:"record_id"`
+	Style          string `json:"style,omitempty"`
+	UserPrompts    string `json:"user_prompts,omitempty"`
 }
 
-// call 发起一次翻译请求并消费 SSE；emit 非空时逐块回调，否则累积返回
-func (h *Hunyuan) call(ctx context.Context, text, source, target string, emit func(string) error) (string, error) {
-	if h.token == "" || h.userID == "" {
-		return "", fmt.Errorf("未配置混元翻译凭证：请在「设置 → 推理后端」填写 X-ID 与 X-Token（App 抓包获取）")
+// translateResp 非流式响应
+type translateResp struct {
+	TranslatedText   string `json:"translated_text"`
+	DetectedLanguage struct {
+		Code string `json:"code"`
+	} `json:"detected_language"`
+	IsSensitive bool `json:"is_sensitive"`
+}
+
+// hunyuanError 业务错误体 {"code":12000,"message":"…"}
+type hunyuanError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// gatewayError 网关错误体 {"error":{"code":"999","message":"…"}}
+type gatewayError struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// creds 取当前凭证（必要时先匿名登录）
+func (h *Hunyuan) creds(ctx context.Context) (string, string, error) {
+	h.mu.Lock()
+	uid, tok := h.userID, h.token
+	h.mu.Unlock()
+	if uid != "" && tok != "" {
+		return uid, tok, nil
 	}
-	if strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf("文本为空")
+	return h.anonLogin(ctx)
+}
+
+// anonLogin 匿名登录换取 userId/token（同一 deviceId 得到同一身份）
+func (h *Hunyuan) anonLogin(ctx context.Context) (string, string, error) {
+	h.mu.Lock()
+	if h.userID != "" && h.token != "" { // 已被其它并发调用拿到
+		uid, tok := h.userID, h.token
+		h.mu.Unlock()
+		return uid, tok, nil
 	}
+	h.mu.Unlock()
+
+	body, _ := json.Marshal(map[string]string{"deviceId": h.deviceID})
+	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(cctx, http.MethodPost, hunyuanAnonLogin, bytes.NewReader(body))
+	if err != nil {
+		return "", "", err
+	}
+	h.setHeaders(req, "", "")
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("混元匿名登录失败: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode != 200 {
+		return "", "", fmt.Errorf("混元匿名登录失败 %d: %s", resp.StatusCode, readableErr(raw))
+	}
+	var out struct {
+		UserID string `json:"userId"`
+		Token  string `json:"token"`
+		IsAnon bool   `json:"isAnon"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.UserID == "" || out.Token == "" {
+		return "", "", fmt.Errorf("混元匿名登录响应异常: %s", strings.TrimSpace(string(raw)))
+	}
+	h.mu.Lock()
+	h.userID, h.token = out.UserID, out.Token
+	h.mu.Unlock()
+	return out.UserID, out.Token, nil
+}
+
+// setHeaders 统一请求头（凭证为空表示匿名登录请求本身）
+func (h *Hunyuan) setHeaders(req *http.Request, uid, tok string) {
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-OS", "ios")
+	req.Header.Set("X-Source", "app")
+	req.Header.Set("X-App-Version", "1.2.2")
+	req.Header.Set("X-Device-Model", "iPhone13,2")
+	req.Header.Set("User-Agent", "Hy/14 CFNetwork/1331.0.7 Darwin/21.4.0")
+	if uid != "" {
+		req.Header.Set("X-ID", uid)
+	}
+	if tok != "" {
+		req.Header.Set("X-Token", tok)
+	}
+}
+
+// buildBody 组装请求体：语言码修正、风格白名单、术语/自由风格转 user_prompts
+func (h *Hunyuan) buildBody(text, source, target, glossary, style string, stream bool) translateReq {
 	if source == "" {
 		source = "auto" // 接口支持自动识别
+	} else {
+		source = fixLang(source)
 	}
 	if target == "" {
 		target = "zh"
 	}
+	target = fixLang(target)
 
-	body, err := json.Marshal(hunyuanReq{
+	r := translateReq{
 		SourceText:     text,
 		SourceLanguage: source,
 		TargetLanguage: target,
 		InferenceMode:  "online",
-		Stream:         true, // 统一走流式：非流式路径消费完即可
-		RecordID:       recordID(),
-	})
+		Stream:         stream,
+	}
+	// style 只认 9 个白名单 key，传错直接 400：命中的原样转发，自由文本风格改走 user_prompts
+	if hunyuanStyles[style] {
+		r.Style = style
+	} else if s := strings.TrimSpace(style); s != "" {
+		r.UserPrompts = "翻译风格要求：" + s
+	}
+	// 术语表：接口没有术语入参（memory 只读），用 user_prompts 传递参考译法
+	if g := strings.TrimSpace(glossary); g != "" {
+		if r.UserPrompts != "" {
+			r.UserPrompts += "\n"
+		}
+		r.UserPrompts += "术语对照（请遵循）：\n" + g
+	}
+	return r
+}
+
+// do 发起一次翻译请求；stream=true 时逐块回调 emit，否则返回完整译文
+func (h *Hunyuan) do(ctx context.Context, text, source, target, glossary, style string, stream bool, emit func(string) error) (string, error) {
+	if strings.TrimSpace(text) == "" {
+		return "", fmt.Errorf("文本为空")
+	}
+	uid, tok, err := h.creds(ctx)
+	if err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(h.buildBody(text, source, target, glossary, style, stream))
 	if err != nil {
 		return "", err
 	}
 
 	cctx, cancel := context.WithTimeout(ctx, 300*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, http.MethodPost, hunyuanEndpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(cctx, http.MethodPost, hunyuanTranslate, bytes.NewReader(raw))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("X-OS", "ios")
-	req.Header.Set("X-Source", "app")
-	req.Header.Set("X-App-Version", "1.2.2")
-	req.Header.Set("X-Device-Model", "iPhone13,2")
-	req.Header.Set("User-Agent", "Hy/14 CFNetwork/1331.0.7 Darwin/21.4.0")
-	req.Header.Set("X-ID", h.userID)
-	req.Header.Set("X-Token", h.token)
+	h.setHeaders(req, uid, tok)
+	if stream {
+		req.Header.Set("Accept", "text/event-stream")
+	}
 
 	resp, err := h.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("混元翻译请求失败: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return "", fmt.Errorf("混元翻译错误 %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
 
-	if emit != nil {
+	if resp.StatusCode == 401 && h.Anonymous() {
+		// 匿名 token 失效：重新登录一次再试（自愈）
+		h.mu.Lock()
+		retry := h.anonTry < 2
+		h.anonTry++
+		h.userID, h.token = "", ""
+		h.mu.Unlock()
+		if retry {
+			return h.do(ctx, text, source, target, glossary, style, stream, emit)
+		}
+	}
+	if resp.StatusCode != 200 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("混元翻译错误 %d: %s", resp.StatusCode, readableErr(b))
+	}
+	h.mu.Lock()
+	h.anonTry = 0
+	h.mu.Unlock()
+
+	if stream {
 		_, err := parseSSE(cctx, resp.Body, emit)
 		return "", err
 	}
-	var sb strings.Builder
-	if _, err := parseSSE(cctx, resp.Body, func(chunk string) error {
-		sb.WriteString(chunk)
-		return nil
-	}); err != nil {
-		return "", err
+	var out translateResp
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("混元翻译响应解析失败: %w", err)
 	}
-	return sb.String(), nil
+	return out.TranslatedText, nil
 }
 
-// TranslateText 一次性翻译（TextCompleter）
-func (h *Hunyuan) TranslateText(ctx context.Context, text, source, target string) (string, error) {
-	return h.call(ctx, text, source, target, nil)
+// TranslateText 一次性翻译（stream=false，返回 JSON 的 translated_text）
+func (h *Hunyuan) TranslateText(ctx context.Context, text, source, target, glossary, style string) (string, error) {
+	return h.do(ctx, text, source, target, glossary, style, false, nil)
 }
 
-// TranslateStream 流式翻译（TextCompleter）
-func (h *Hunyuan) TranslateStream(ctx context.Context, text, source, target string, emit func(string) error) error {
-	_, err := h.call(ctx, text, source, target, emit)
+// TranslateStream 流式翻译（stream=true，OpenAI 风格 SSE）
+func (h *Hunyuan) TranslateStream(ctx context.Context, text, source, target, glossary, style string, emit func(string) error) error {
+	_, err := h.do(ctx, text, source, target, glossary, style, true, emit)
 	return err
 }
 
-// Complete 满足通用 Completer 接口：把提示词里 "\n\n" 之后的原文取出来（appcore 正常走 TextCompleter，
-// 这里是兜底路径，仅当调用方自己拼了提示词时使用；分段提示词带前文时不要走这里）。
+// Complete 满足通用 Completer 接口（兜底路径；appcore 正常走 TextCompleter）
 func (h *Hunyuan) Complete(ctx context.Context, r ChatRequest) (string, error) {
 	text := lastUserContent(r)
 	if i := strings.Index(text, "\n\n"); i >= 0 {
@@ -153,10 +300,10 @@ func (h *Hunyuan) Complete(ctx context.Context, r ChatRequest) (string, error) {
 	if target == "" {
 		target = "zh"
 	}
-	return h.TranslateText(ctx, text, r.SourceLang, target)
+	return h.TranslateText(ctx, text, r.SourceLang, target, "", "")
 }
 
-// CompleteStream 满足 StreamCompleter 接口（同上，兜底路径）
+// CompleteStream 满足 StreamCompleter 接口（兜底路径）
 func (h *Hunyuan) CompleteStream(ctx context.Context, r ChatRequest, emit func(string) error) (int, error) {
 	out, err := h.Complete(ctx, r)
 	if err != nil {
@@ -168,12 +315,41 @@ func (h *Hunyuan) CompleteStream(ctx context.Context, r ChatRequest, emit func(s
 	return len([]rune(out)), nil
 }
 
-// recordID 生成 32 位十六进制请求 ID（App 里是 UUID 去掉连字符）
-func recordID() string {
-	const hex = "0123456789abcdef"
-	b := make([]byte, 32)
-	for i := range b {
-		b[i] = hex[rand.Intn(len(hex))]
+// readableErr 从两种错误体里取 message，取不到就原样返回
+func readableErr(raw []byte) string {
+	var g gatewayError
+	if err := json.Unmarshal(raw, &g); err == nil && g.Error.Message != "" {
+		return fmt.Sprintf("[%s] %s", g.Error.Code, g.Error.Message)
 	}
-	return string(b)
+	var b hunyuanError
+	if err := json.Unmarshal(raw, &b); err == nil && b.Message != "" {
+		return fmt.Sprintf("[%d] %s", b.Code, b.Message)
+	}
+	return strings.TrimSpace(string(raw))
 }
+
+// fixLang 语言码修正（接口用 zh-TW）
+func fixLang(code string) string {
+	if v, ok := hunyuanLangFix[code]; ok {
+		return v
+	}
+	return code
+}
+
+// newUUID 生成标准 UUID v4（deviceId 用，免引入依赖）
+func newUUID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// 极端情况下退化为时间戳派生的固定值，保证可用
+		ts := time.Now().UnixNano()
+		for i := range b {
+			b[i] = byte(ts >> (uint(i%8) * 8))
+		}
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// NewDeviceID 生成一个新的设备号（appcore 用于首次持久化）
+func NewDeviceID() string { return newUUID() }

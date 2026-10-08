@@ -31,8 +31,13 @@ func Start(cfg *config.Config) (*Core, error) {
 	if cfg.Backend == "openai" {
 		c.Completer = engine.NewOpenAI(cfg.OpenAIBaseURL, cfg.OpenAIKey, cfg.OpenAIModel)
 	} else if cfg.Backend == "hunyuan" {
-		// 腾讯混元翻译 App 私有接口（免费，需 X-ID / X-Token）
-		c.Completer = engine.NewHunyuan(cfg.HunyuanUserID, cfg.HunyuanToken)
+		// 腾讯混元翻译 App 接口（免费）：未填凭证则自动匿名登录，凭证与设备号持久化到配置
+		if cfg.HunyuanDeviceID == "" {
+			cfg.HunyuanDeviceID = engine.NewDeviceID()
+			_ = cfg.Save()
+		}
+		h := engine.NewHunyuan(cfg.HunyuanUserID, cfg.HunyuanToken, cfg.HunyuanDeviceID)
+		c.Completer = h
 	} else if cfg.Backend == "hymt" {
 		// hy-mt-rs CLI 后端：支持 AngelSlim 1.25bit（STQ1_0）/ 2bit（SEQ）GGUF
 		c.Completer = engine.NewHyMT(config.Resolve(cfg.ModelPath), hyMTBinPath(cfg))
@@ -89,11 +94,11 @@ func Start(cfg *config.Config) (*Core, error) {
 func translateTextNative(ctx context.Context, tc engine.TextCompleter, req *api.TranslateRequest) (string, error) {
 	segs := api.SplitSegments(req.Text, maxSegRunes)
 	if len(segs) <= 1 {
-		return tc.TranslateText(ctx, req.Text, req.Source, req.Target)
+		return tc.TranslateText(ctx, req.Text, req.Source, req.Target, req.TermGlossary, req.Style)
 	}
 	var full strings.Builder
 	for _, seg := range segs {
-		out, err := tc.TranslateText(ctx, seg, req.Source, req.Target)
+		out, err := tc.TranslateText(ctx, seg, req.Source, req.Target, req.TermGlossary, req.Style)
 		if err != nil {
 			return "", err
 		}
@@ -122,7 +127,7 @@ func translateStreamNative(ctx context.Context, tc engine.TextCompleter, req *ap
 		}
 		emitted := 0
 		var lastProg time.Time
-		if err := tc.TranslateStream(ctx, seg, req.Source, req.Target, func(chunk string) error {
+		if err := tc.TranslateStream(ctx, seg, req.Source, req.Target, req.TermGlossary, req.Style, func(chunk string) error {
 			emitted += len([]rune(chunk))
 			if progress != nil && time.Since(lastProg) > 200*time.Millisecond {
 				local := float64(emitted) / float64(maxInt(segRunes, 1))

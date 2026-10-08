@@ -140,8 +140,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		// OpenAI 兼容后端：有配置即视为可用
 		resp["engine"] = s.cfg.OpenAIBaseURL != ""
 	} else if s.cfg.Backend == "hunyuan" {
-		// 混元翻译 App 接口：填了 X-ID 与 X-Token 即视为可用
-		resp["engine"] = s.cfg.HunyuanUserID != "" && s.cfg.HunyuanToken != ""
+		// 混元翻译 App 接口：未填凭证也能用（自动匿名登录），因此始终视为可用
+		resp["engine"] = true
 	} else if s.cfg.Backend == "hymt" {
 		// hy-mt CLI 后端：可执行文件与模型存在即视为可用（无常驻进程）
 		_, statBin := os.Stat(config.Resolve(s.cfg.EnginePath))

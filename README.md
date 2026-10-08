@@ -26,7 +26,7 @@
 - **多后端**：
   - `local`（默认）：本地 llama.cpp（llama-server 子进程），完全离线
   - `hymt`：hy-mt-rs 引擎，支持 AngelSlim 官方 **1.25bit（STQ1_0）** 与 **2bit（SEQ）** GGUF（体积小、省内存）
-  - `hunyuan`：腾讯混元翻译 App 私有接口（**免费**，只需 X-ID / X-Token，见下）
+  - `hunyuan`：腾讯混元翻译 App 接口（**免费、零配置**：自动匿名登录；也可填账号 X-ID / X-Token）
   - 模型切换时**按文件类型自动路由后端**（2bit/1.25bit → `hymt`，其余 → 本地 llama-server）
   - `openai`：任意 OpenAI 兼容 API（OpenAI / 通义 / DeepSeek / 本地自建等）
 - **模型下拉切换**：把 `.gguf` 放入 `models/` 目录，Web 设置页下拉选择并「刷新」
@@ -170,23 +170,31 @@ build\suiyi.exe translate "你好世界" -t en
 
 ---
 
-## 腾讯混元翻译后端（免费）
+## 腾讯混元翻译后端（免费 · 零配置可用）
 
-设置页「推理后端」选 **腾讯混元翻译（App 接口 · 免费）**，填两个请求头值即可：
+设置页「推理后端」选 **腾讯混元翻译（App 接口 · 免费）** 就能用，**不需要填任何凭证**：
 
-| 字段 | 来源 |
+- **匿名模式（默认）**：X-ID / X-Token 留空时，程序用本机设备号调
+  `POST /api/login/anon` 换一个匿名账号（`userId` 形如 `a_…`），接口官方支持、不涉及你的个人账号。
+  设备号自动生成并存在 `data/config.json`（`hunyuan_device_id`），**同一设备重复启动得到同一匿名身份**。
+- **账号模式（可选）**：填上 App 抓包得到的 `X-ID` / `X-Token`，译文会进你 App 里的翻译历史。
+
+抓包方式：手机端「腾讯混元翻译」登录后抓 `POST /api/v1/translate` 请求的 `X-ID`、`X-Token` 两个头
+（Proxyman / ProxyPin / Charles 均可）。凭证只保存在本机 `data/config.json`，改完需重启服务生效。
+
+| 能力 | 说明 |
 |---|---|
-| `X-ID` | 手机端「腾讯混元翻译」App 的 `userId`（16 位，如 `u_0000000000000000`） |
-| `X-Token` | 同一 App 的登录令牌（64 字符） |
+| 语言 | 接口支持 38 种（简体/繁体/粤语/英日韩法德西…）；我们的 `zh-Hant` 会自动映射成接口的 `zh-TW` |
+| 风格 | 9 项固定白名单（`default` / `daily_spoken` / `business_formal` / `academic_paper` / `news_report` / `promotion_copy` / `novel` / `legal_contract` / `popular_science`）直接转发；**其它自由文本风格**（如"商务正式"）与**术语表**自动改用接口的 `user_prompts` 自定义提示词 |
+| 长度 | 接口单次上限 5000 字；本程序按 3000 字自动分段，逐段翻译并拼接 |
+| 流式 | 非流式走 JSON（`translated_text`），流式走 OpenAI 风格 SSE |
 
-获取方式：手机 App 登录后抓包（Proxyman / ProxyPin / Charles 均可），看
-`POST https://translate.hunyuan.tencent.com/api/v1/translate` 请求里的 `X-ID`、`X-Token` 两个头。
-凭证只保存在本机 `data/config.json`，改完需重启服务生效。
-
-> ⚠️ 这是**非官方接口**（从 App 抓包得到，本机实测可用）：免费、无需 Key，
-> 但**不保证长期可用**，令牌会过期（重新抓包替换即可），请勿外传令牌；
-> 该接口是专用翻译接口，**不支持术语表与风格**；超长文本按 3000 字自动分段逐段翻译。
-> 另外它对「同一句话重复几百遍」这类退化输入会自己复读，属于远端模型行为。
+> ⚠️ 这是**非官方接口**（从 App 抓包还原，本机实测可用）：免费、无需 Key，但不保证长期可用；
+> 账号令牌约 **30 天**过期且纯 API 调用不会自动续期（重新抓包替换即可），匿名身份则会在失效时自动重新登录；
+> 请勿外传账号令牌。另外它对「同一句话重复几百遍」这类退化输入会自己复读，属于远端模型行为。
+>
+> 接口细节（含匿名登录、字段上限、错误码、9 种风格、38 种语言）见
+> `混元翻译接口文档.md`（本仓库外，随抓包更新）。
 
 ## 本地 API
 
