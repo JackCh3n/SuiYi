@@ -35,6 +35,8 @@ import (
 	"suiyi/internal/appcore"
 	"suiyi/internal/autostart"
 	"suiyi/internal/config"
+	"suiyi/internal/gui"
+	"suiyi/internal/hotkey"
 	"suiyi/internal/tray"
 )
 
@@ -226,6 +228,45 @@ func run(o appOptions) int {
 		}
 	}
 
+	// 全局快捷键（如 alt+f，设置页可改、保存即生效）：
+	// 显示主窗口 → 读剪贴板 → 注入页面原文框并自动翻译
+	var hotkeyStop func()
+	applyGlobalHotkey := func(combo string) error {
+		if hotkeyStop != nil {
+			hotkeyStop()
+			hotkeyStop = nil
+		}
+		if combo == "" {
+			core.Srv.Log("全局快捷键已关闭")
+			return nil
+		}
+		if !o.window {
+			return fmt.Errorf("全局快捷键仅在桌面窗口模式下可用")
+		}
+		stop, err := hotkey.Start(combo, func() {
+			select { // 显示并前置主窗口
+			case show <- struct{}{}:
+			default:
+			}
+			text := readClipboardText()
+			core.Srv.Log("全局快捷键触发：剪贴板 %d 字符", len([]rune(text)))
+			if text == "" {
+				return // 剪贴板里没有文本（可能是图片/文件）
+			}
+			gui.PushHotkeyText(text)
+		})
+		if err != nil {
+			return err
+		}
+		hotkeyStop = stop
+		core.Srv.Log("全局快捷键已启用: %s（显示窗口并翻译剪贴板内容）", combo)
+		return nil
+	}
+	if err := applyGlobalHotkey(strings.TrimSpace(cfg.GlobalHotkey)); err != nil {
+		core.Srv.Log("全局快捷键启用失败: %v", err)
+	}
+	core.Srv.SetHotkeyFn(applyGlobalHotkey)
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() { <-sig; requestQuit() }()
@@ -245,6 +286,9 @@ func run(o appOptions) int {
 		<-quit
 	}
 
+	if hotkeyStop != nil {
+		hotkeyStop()
+	}
 	fmt.Println("正在退出…")
 	return 0
 }

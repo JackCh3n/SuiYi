@@ -31,6 +31,7 @@ type Server struct {
 	logMax    int
 
 	switchFn func(modelPath string) (*BackendSwitch, error) // 运行时切换后端（appcore 注入）
+	hotkeyFn func(combo string) error                       // 运行时改全局快捷键（main 注入）
 }
 
 // BackendSwitch 描述一次运行时后端切换的结果
@@ -43,6 +44,11 @@ type BackendSwitch struct {
 // SetSwitchFn 注入模型切换回调（由 appcore 提供，实现按模型类型自动路由后端）
 func (s *Server) SetSwitchFn(fn func(modelPath string) (*BackendSwitch, error)) {
 	s.switchFn = fn
+}
+
+// SetHotkeyFn 注入全局快捷键变更回调（由 main 提供，保存即生效）
+func (s *Server) SetHotkeyFn(fn func(combo string) error) {
+	s.hotkeyFn = fn
 }
 
 // New 创建 API 服务
@@ -402,6 +408,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			OpenAIModel   *string `json:"openai_model"`
 			HunyuanUserID *string `json:"hunyuan_user_id"`
 			HunyuanToken  *string `json:"hunyuan_token"`
+			GlobalHotkey  *string `json:"global_hotkey"`
 		}
 		if err := readJSON(r, &patch); err != nil {
 			writeJSON(w, 400, map[string]string{"error": err.Error()})
@@ -456,6 +463,17 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.HunyuanToken != nil {
 			s.cfg.HunyuanToken = strings.TrimSpace(*patch.HunyuanToken)
+		}
+		if patch.GlobalHotkey != nil {
+			combo := strings.TrimSpace(*patch.GlobalHotkey)
+			// 先注册再落盘：注册失败（格式错/被占用）直接报错，不保存
+			if s.hotkeyFn != nil && combo != s.cfg.GlobalHotkey {
+				if err := s.hotkeyFn(combo); err != nil {
+					writeJSON(w, 500, map[string]string{"error": "全局快捷键设置失败: " + err.Error()})
+					return
+				}
+			}
+			s.cfg.GlobalHotkey = combo
 		}
 		if err := s.cfg.Save(); err != nil {
 			writeJSON(w, 500, map[string]string{"error": "保存配置失败: " + err.Error()})

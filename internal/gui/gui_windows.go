@@ -12,9 +12,11 @@ package gui
 import (
 	"bytes"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os/exec"
+	"time"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/menu"
@@ -22,6 +24,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 //go:embed all:frontend
@@ -48,9 +51,13 @@ type Options struct {
 	ShowCh <-chan struct{}
 }
 
+// currentApp 当前窗口实例（Run 时记录，供全局快捷键等外部入口注入页面 JS）
+var currentApp *App
+
 // Run 启动窗口（阻塞，须在主 goroutine 调用；窗口退出后返回）
 func Run(o Options) error {
 	app := &App{apiURL: o.APIURL, version: o.Version, ready: make(chan struct{})}
+	currentApp = app
 
 	// 把真实地址注入首页（端口可配置，页面上不再有写死的 8848）
 	indexPage := bytes.ReplaceAll(mustReadAsset("frontend/index.html"), []byte(apiURLPlaceholder), []byte(o.APIURL))
@@ -112,6 +119,27 @@ func Run(o Options) error {
 		return fmt.Errorf("GUI 启动失败: %w", err)
 	}
 	return nil
+}
+
+// PushHotkeyText 把剪贴板文本注入当前页面并触发翻译。
+// 页面（Web 管理界面）需定义 window.suiyiHotkeyTranslate(text)；
+// 若当前页还没定义（如仍在启动页/别的页面），静默跳过。
+// WindowExecJS 会派发到 UI 线程执行，可在任意 goroutine 调用。
+func PushHotkeyText(text string) {
+	app := currentApp
+	if app == nil {
+		return
+	}
+	select {
+	case <-app.ready: // 等窗口就绪，避免 ctx 未初始化
+	case <-time.After(3 * time.Second):
+		return
+	}
+	raw, err := json.Marshal(text)
+	if err != nil {
+		return
+	}
+	runtime.WindowExecJS(app.ctx, "window.suiyiHotkeyTranslate && window.suiyiHotkeyTranslate("+string(raw)+")")
 }
 
 // buildMenu 原生应用菜单 + 快捷键（Wails keys）

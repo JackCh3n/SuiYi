@@ -34,6 +34,14 @@ body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;backgroun
 .pill.warm .dot{background:var(--warn)}
 .theme-btn{cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--text);padding:6px 12px;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:6px}
 .theme-btn:hover{background:var(--hover)}
+kbd{background:var(--bg);border:1px solid var(--border);border-bottom-width:2px;border-radius:4px;padding:1px 6px;font-family:inherit;font-size:12px;white-space:nowrap;color:var(--text)}
+.help-mask{position:fixed;inset:0;background:rgba(0,0,0,.38);display:flex;align-items:center;justify-content:center;z-index:60}
+.help-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 22px;max-width:560px;width:calc(100vw - 48px);max-height:82vh;overflow:auto;box-shadow:0 10px 36px rgba(0,0,0,.18)}
+.help-card h2{font-size:15px;margin:0 0 6px}
+.help-group{font-size:12px;color:var(--primary);font-weight:600;margin:12px 0 2px}
+.help-card table{width:100%;border-collapse:collapse;font-size:13px}
+.help-card td{padding:4px 10px 4px 0;border-bottom:1px solid var(--bg);vertical-align:top}
+.help-card td:first-child{width:150px;white-space:nowrap}
 .wrap{max-width:1100px;margin:0 auto;padding:20px 24px 60px}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:20px}
 .tab{cursor:pointer;padding:10px 18px;font-size:14px;color:var(--sub);border-bottom:2px solid transparent}
@@ -133,6 +141,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   </div>
   <div class="right">
     <span class="pill" id="enginePill"><span class="dot"></span><span id="engineText">引擎检查中</span></span>
+    <button class="theme-btn" id="helpBtn" title="快捷键帮助">⌨ 快捷键</button>
     <button class="theme-btn" id="themeBtn" title="切换亮色 / 暗色">🌙 暗色</button>
   </div>
 </header>
@@ -275,6 +284,10 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
         <label class="switch"><input type="checkbox" id="cfgAutostart"><span class="sl"></span></label>
       </div>
       <div class="set-row">
+        <div class="set-left"><h4>全局快捷键</h4><p>系统级（任何程序在前台都生效）：按下后显示主窗口，并自动把剪贴板内容填入原文翻译。格式如 alt+f、ctrl+alt+t，留空关闭；保存后立即生效（需桌面窗口模式）</p></div>
+        <input type="text" id="cfgHotkey" style="width:160px" placeholder="alt+f">
+      </div>
+      <div class="set-row">
         <div class="set-left"><h4>服务端口</h4><p>Web 管理界面 / API 监听端口，仅本机可访问</p></div>
         <input type="text" id="cfgPort" style="width:120px" inputmode="numeric">
       </div>
@@ -310,6 +323,16 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
 <div class="footer">随译 SuiYi · 腾讯 Hy-MT2-1.8B · 本地离线 / OpenAI 兼容多后端</div>
 <div class="toast" id="toast"></div>
 
+  <!-- 快捷键帮助 -->
+  <div class="help-mask" id="helpMask" style="display:none">
+    <div class="help-card">
+      <h2>⌨ 快捷键</h2>
+      <div id="helpBody"></div>
+      <div style="text-align:right;margin-top:14px">
+        <button class="btn" id="helpClose">知道了（Esc）</button>
+      </div>
+    </div>
+  </div>
 <script>
 (function(){
   const $ = s => document.querySelector(s);
@@ -509,11 +532,11 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     }catch(e){
       const st = statFinish();
       if(e.name === 'AbortError'){
-        // 用户点击停止：保留已生成的部分译文，并保留已测到的速度统计
+        // 用户点击停止（或全局快捷键打断）：保留已生成的部分译文，并保留已测到的速度统计
         resultText.textContent = full || resultText.textContent;
         $('#progText').textContent = '已停止 · ' + st.avg.toFixed(1) + ' token/s';
         statRender(st);
-        toast('已停止翻译');
+        if(!hotkeyPending) toast('已停止翻译');
       }else{
         $('#progWrap').style.display = 'none';
         resultText.textContent = resultText.textContent || '错误：' + e.message;
@@ -522,6 +545,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     }finally{
       translating = false;
       abortCtrl = null;
+      if(hotkeyPending){ hotkeyPending = false; setTimeout(doTranslate, 60); } // 全局快捷键打断旧任务后接着翻新内容
       $('#btnStop').style.display = 'none';
       resultText.classList.remove('loading');
       setBtnLoading($('#btnTranslate'), false, '翻 译');
@@ -713,6 +737,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       $('#cfgOpenAIModel').value = d.openai_model || '';
       $('#cfgHyID').value = d.hunyuan_user_id || '';
       $('#cfgHyToken').value = d.hunyuan_token || '';
+      $('#cfgHotkey').value = d.global_hotkey || '';
       // OpenAI 客户端在启动时构建（模型名/地址/Key 都固化在里面），改了必须重启才生效
       openaiLoaded = { base: d.openai_base_url || '', key: d.openai_key || '', model: d.openai_model || '',
                        hyID: d.hunyuan_user_id || '', hyToken: d.hunyuan_token || '' };
@@ -734,6 +759,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     $('#cfgOpenAIModel').value = 'gpt-4o-mini';
     $('#cfgHyID').value = '';
     $('#cfgHyToken').value = '';
+    $('#cfgHotkey').value = '';
     loadModels('models/Hy-MT2-1.8B-Q4_K_M.gguf');
     syncOpenaiGroup();
   }
@@ -755,6 +781,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
           openai_model: $('#cfgOpenAIModel').value.trim(),
           hunyuan_user_id: $('#cfgHyID').value.trim(),
           hunyuan_token: $('#cfgHyToken').value.trim(),
+          global_hotkey: $('#cfgHotkey').value.trim(),
         })});
       const d = await r.json();
       if(!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
@@ -890,6 +917,93 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     document.getElementById(t.dataset.pane).classList.add('active');
     if(t.dataset.pane === 'p-logs') loadLogs(); // 切到日志页自动加载
   });
+
+  /* ============ 快捷键 ============ */
+  /* 帮助面板数据（与下面的分发器保持一致；列表由它渲染，改这里即可同步） */
+  const HELP_GROUPS = [
+    ['翻译', [
+      ['Ctrl + Enter', '立即翻译'],
+      ['Esc', '停止翻译'],
+      ['Alt + C', '复制译文'],
+      ['Alt + V', '粘贴剪贴板到原文'],
+      ['Alt + S', '交换语言'],
+      ['Alt + X', '清空原文'],
+      ['Alt + P', '分享截图（生成图片并复制到剪贴板）'],
+    ]],
+    ['界面', [
+      ['Alt + T', '切换亮 / 暗主题'],
+      ['Alt + 1 / 2 / 3', '切换页签（翻译 / 设置 / 日志）'],
+      ['⌨ 按钮', '右上角「快捷键」打开本面板'],
+    ]],
+    ['长文阅读（页面出现滚动条时）', [
+      ['Home / End', '跳到内容最上 / 最下'],
+      ['PageUp / PageDown', '上一页 / 下一页（约一屏）'],
+    ]],
+    ['窗口（原生菜单）', [
+      ['Ctrl + O', '在浏览器打开管理界面'],
+      ['Ctrl + H', '显示 / 隐藏窗口'],
+      ['Ctrl + D', '打开数据目录'],
+      ['Ctrl + M', '打开模型目录'],
+      ['Ctrl + Q', '退出'],
+    ]],
+    ['全局（系统级，设置页「全局快捷键」开启）', [
+      ['如 Alt + F', '任何程序在前台时按下：显示主窗口，并把剪贴板内容填入原文自动翻译'],
+    ]],
+  ];
+  const renderHelp = () => {
+    $('#helpBody').innerHTML = HELP_GROUPS.map(g =>
+      '<div class="help-group">' + g[0] + '</div>' +
+      '<table>' + g[1].map(r =>
+        '<tr><td><kbd>' + r[0] + '</kbd></td><td>' + r[1] + '</td></tr>').join('') + '</table>'
+    ).join('');
+  };
+  const helpOpen = () => $('#helpMask').style.display !== 'none';
+  const openHelp = () => { renderHelp(); $('#helpMask').style.display = ''; };
+  const closeHelp = () => { $('#helpMask').style.display = 'none'; };
+  $('#helpBtn').onclick = openHelp;
+  $('#helpClose').onclick = closeHelp;
+  $('#helpMask').onclick = e => { if(e.target === $('#helpMask')) closeHelp(); };
+
+  /* 快捷键分发器：Alt+字母复用现有按钮（零重复实现）；Ctrl+Enter 立即翻译；Esc 停止/关面板 */
+  window.addEventListener('keydown', e => {
+    if(helpOpen()){
+      if(e.key === 'Escape'){ closeHelp(); e.preventDefault(); }
+      return;                       // 面板打开时不响应其它快捷键
+    }
+    if(e.key === 'Escape'){
+      if(translating && abortCtrl){ abortCtrl.abort(); e.preventDefault(); }
+      return;
+    }
+    if(e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.key === 'Enter'){
+      e.preventDefault(); clearTimeout(debounce); doTranslate();
+      return;
+    }
+    if(e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey){
+      const click = id => () => $(id).click();
+      const map = {
+        KeyC: click('#copyBtn'), KeyV: click('#pasteBtn'), KeyS: click('#swapBtn'),
+        KeyX: click('#clearBtn'), KeyP: click('#shareShotBtn'), KeyT: click('#themeBtn'),
+      };
+      if(map[e.code]){ e.preventDefault(); map[e.code](); return; }
+      const digits = { Digit1: 0, Digit2: 1, Digit3: 2 };
+      if(e.code in digits){
+        e.preventDefault();
+        const tabs = document.querySelectorAll('.tab');
+        if(tabs[digits[e.code]]) tabs[digits[e.code]].click();
+      }
+    }
+  }, true);
+
+  /* 全局快捷键入口（Go 侧 WindowExecJS 调用）：填入剪贴板文本并立即翻译 */
+  let hotkeyPending = false;
+  window.suiyiHotkeyTranslate = function(text){
+    if(typeof text !== 'string' || !text.trim()) return;
+    srcText.value = text;
+    srcText.dispatchEvent(new Event('input'));   // 触发字数/语言检测/自动目标语言
+    if(translating && abortCtrl){ hotkeyPending = true; abortCtrl.abort(); return; }
+    clearTimeout(debounce);
+    doTranslate();
+  };
 
   /* 长文阅读翻页：Home/End 跳到内容头/尾，PageUp/PageDown 上一页/下一页。
      只在页面确实可滚动（长文本翻译把页面撑高）时接管；没有长内容时完全放行，保留原生行为。

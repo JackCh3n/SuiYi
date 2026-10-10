@@ -20,3 +20,6 @@ type Options struct {
 func Run(Options) error {
 	return errors.New("当前平台不支持桌面窗口，请使用 serve 模式（浏览器访问）")
 }
+
+// PushHotkeyText 非 Windows 无窗口，noop
+func PushHotkeyText(string) {}

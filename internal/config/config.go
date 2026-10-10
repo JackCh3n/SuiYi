@@ -24,6 +24,7 @@ type Config struct {
 	OpenAIModel     string `json:"openai_model"`      // OpenAI 兼容 API 模型名
 	HunyuanUserID   string `json:"hunyuan_user_id"`   // 混元翻译 App 接口：X-ID
 	HunyuanToken    string `json:"hunyuan_token"`     // 混元翻译 App 接口：X-Token（会过期，重新抓包替换）
+	GlobalHotkey    string `json:"global_hotkey"`     // 全局快捷键（如 alt+f，空=关闭）：显示主窗口并自动翻译剪贴板内容
 	HunyuanDeviceID string `json:"hunyuan_device_id"` // 混元匿名身份的设备号（自动生成，勿改）
 }
 
