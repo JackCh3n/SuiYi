@@ -137,10 +137,16 @@ func listen(mods, vk uint32, name string, onHotkey func(), stop <-chan struct{})
 	}
 	defer procUnregisterHotKey.Call(0, 1)
 
+	// 唤醒线程的看门狗：listen 退出时也要结束，否则它会永久阻塞在 <-stop 上（每换一次快捷键泄漏一个）
+	done := make(chan struct{})
+	defer close(done)
 	tid, _, _ := procGetCurrentThreadID.Call()
 	go func() {
-		<-stop
-		procPostThreadMessage.Call(tid, wmStopMsg, 0, 0) // 唤醒 GetMessage
+		select {
+		case <-stop:
+			procPostThreadMessage.Call(tid, wmStopMsg, 0, 0) // 唤醒 GetMessage
+		case <-done:
+		}
 	}()
 
 	var m msg

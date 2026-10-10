@@ -215,6 +215,14 @@ func (c *Core) SwitchModel(modelPath string) (*api.BackendSwitch, error) {
 		NCTX:       c.cfg.NCTX,
 	})
 	if err := eng.Start(context.Background()); err != nil {
+		// 旧引擎已被停掉，必须把它重新拉起来：否则切换失败后 completer 指向一个已停的引擎，
+		// 服务还在监听但所有翻译都会连接失败（先启后停的旧写法反而不会有这个问题）
+		if c.Eng != nil {
+			if rbErr := c.Eng.Start(context.Background()); rbErr != nil {
+				return nil, fmt.Errorf("启动引擎失败: %v（旧引擎回滚也失败: %v）", err, rbErr)
+			}
+			return nil, fmt.Errorf("启动引擎失败，已回滚到原模型: %w", err)
+		}
 		return nil, fmt.Errorf("启动引擎失败: %w", err)
 	}
 	c.Eng = eng

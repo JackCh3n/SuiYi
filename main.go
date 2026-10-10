@@ -230,8 +230,20 @@ func run(o appOptions) int {
 
 	// 全局快捷键（如 alt+f，设置页可改、保存即生效）：
 	// 显示主窗口 → 读剪贴板 → 注入页面原文框并自动翻译
+	// 设置保存与退出都会碰 hotkeyStop，加锁避免并发下重复注销/覆盖
+	var hotkeyMu sync.Mutex
 	var hotkeyStop func()
+	stopGlobalHotkey := func() {
+		hotkeyMu.Lock()
+		defer hotkeyMu.Unlock()
+		if hotkeyStop != nil {
+			hotkeyStop()
+			hotkeyStop = nil
+		}
+	}
 	applyGlobalHotkey := func(combo string) error {
+		hotkeyMu.Lock()
+		defer hotkeyMu.Unlock()
 		if hotkeyStop != nil {
 			hotkeyStop()
 			hotkeyStop = nil
@@ -286,9 +298,7 @@ func run(o appOptions) int {
 		<-quit
 	}
 
-	if hotkeyStop != nil {
-		hotkeyStop()
-	}
+	stopGlobalHotkey()
 	fmt.Println("正在退出…")
 	return 0
 }

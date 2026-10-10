@@ -833,12 +833,17 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     return out;
   }
   function drawShareCard(src, srcLang, dst, dstLang){
-    const W = 1000, PAD = 48, BODY = W - PAD * 2, LINE = 30;
+    const W = 1000, PAD = 48, BODY = W - PAD * 2, LINE = 30, MAX_H = 24000;
     const cv = document.createElement('canvas');
     const ctx = cv.getContext('2d');
     ctx.font = '17px ' + SHARE_FONT;
-    const srcLines = wrapLines(ctx, src, BODY);
-    const dstLines = wrapLines(ctx, dst, BODY);
+    let srcLines = wrapLines(ctx, src, BODY);
+    let dstLines = wrapLines(ctx, dst, BODY);
+    // 画布高度超限（几万行译文）时内核会导出失败/全白，按上限截断并在卡片里注明
+    const cap = Math.max(20, Math.floor((MAX_H - 300) / 2 / LINE));
+    const srcCut = srcLines.length > cap, dstCut = dstLines.length > cap;
+    if (srcCut) srcLines = srcLines.slice(0, cap);
+    if (dstCut) dstLines = dstLines.slice(0, cap);
     const H = 96 + 42 + srcLines.length * LINE + 34 + 42 + dstLines.length * LINE + 84;
     cv.width = W; cv.height = H;
 
@@ -857,16 +862,21 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     ctx.textAlign = 'left';
 
     let y = 106;
-    const section = (title, color, lines, textColor) => {
+    const section = (title, color, lines, textColor, cut) => {
       ctx.fillStyle = color; ctx.font = '600 13px ' + SHARE_FONT;
       ctx.fillText(title, PAD, y);
       y += 22;
       ctx.fillStyle = textColor; ctx.font = '17px ' + SHARE_FONT;
       for(const l of lines){ ctx.fillText(l, PAD, y); y += LINE; }
+      if(cut){
+        ctx.fillStyle = '#a8adb5'; ctx.font = '13px ' + SHARE_FONT;
+        ctx.fillText('…（内容过长，已截断）', PAD, y);
+        y += LINE;
+      }
       y += 34;
     };
-    section('原文 · ' + (srcLang || '自动识别'), '#8a9099', srcLines, '#4e5969');
-    section('译文 · ' + (dstLang || ''), '#3370ff', dstLines, '#1f2329');
+    section('原文 · ' + (srcLang || '自动识别'), '#8a9099', srcLines, '#4e5969', srcCut);
+    section('译文 · ' + (dstLang || ''), '#3370ff', dstLines, '#1f2329', dstCut);
 
     ctx.fillStyle = '#e5e6eb'; ctx.fillRect(PAD, H - 78, BODY, 1);
     ctx.fillStyle = '#a8adb5'; ctx.font = '13px ' + SHARE_FONT;
@@ -1028,7 +1038,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   }, true);
 
   /* 定时健康检查 */
-  loadLangs().then(checkHealth).then(loadConfig);
+  loadLangs().then(checkHealth).then(loadConfig).then(() => updateDetect());
   setInterval(checkHealth, 5000);
 
 })();
