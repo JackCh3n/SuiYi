@@ -15,12 +15,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/menu"
-	"github.com/wailsapp/wails/v2/pkg/menu/keys"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
@@ -51,6 +51,17 @@ type Options struct {
 	ShowCh <-chan struct{}
 }
 
+// wailsLogger 把 Wails 内部日志转发到标准错误（排查拖拽/消息问题用）
+type wailsLogger struct{}
+
+func (wailsLogger) Print(m string)   { fmt.Fprintln(os.Stderr, "[wails]", m) }
+func (wailsLogger) Trace(m string)   {}
+func (wailsLogger) Debug(m string)   {}
+func (wailsLogger) Info(m string)    { fmt.Fprintln(os.Stderr, "[wails]", m) }
+func (wailsLogger) Warning(m string) { fmt.Fprintln(os.Stderr, "[wails]", m) }
+func (wailsLogger) Error(m string)   { fmt.Fprintln(os.Stderr, "[wails:ERR]", m) }
+func (wailsLogger) Fatal(m string)   { fmt.Fprintln(os.Stderr, "[wails:FATAL]", m) }
+
 // currentApp 当前窗口实例（Run 时记录，供全局快捷键等外部入口注入页面 JS）
 var currentApp *App
 
@@ -78,6 +89,13 @@ func Run(o Options) error {
 		}()
 	}
 
+	// 提取 Web 界面的源（如 http://127.0.0.1:9848）：Wails 的消息（拖拽/窗口控制）
+	// 按源校验，重定向后的页面必须加入白名单才能用 runtime
+	apiOrigin := o.APIURL // 形如 http://127.0.0.1:9848/
+	if i := strings.Index(o.APIURL[7:], "/"); i >= 0 {
+		apiOrigin = o.APIURL[:7+i] // 去掉路径，只留 scheme://host:port
+	}
+
 	err := wails.Run(&options.App{
 		Title:     "随译 SuiYi · 本地翻译",
 		Width:     1180,
@@ -99,7 +117,12 @@ func Run(o Options) error {
 				})
 			}),
 		},
-		Menu:                     buildMenu(app),
+		// 无边框窗口 + 自绘标题栏（页面 header 即拖拽区，右侧窗口按钮）。
+		// 原生菜单与无边框不兼容，其功能已迁入页面：Ctrl+O/H/D/M/Q（页面分发器）、
+		// 关于（帮助面板）、退出（托盘/Ctrl+Q）。
+		Frameless:                true,
+		Logger:                   wailsLogger{},
+		BindingsAllowedOrigins:   apiOrigin,
 		BackgroundColour:         options.NewRGB(245, 246, 250),
 		OnStartup:                app.startup,
 		HideWindowOnClose:        o.HideOnClose,
@@ -140,36 +163,6 @@ func PushHotkeyText(text string) {
 		return
 	}
 	runtime.WindowExecJS(app.ctx, "window.suiyiHotkeyTranslate && window.suiyiHotkeyTranslate("+string(raw)+")")
-}
-
-// buildMenu 原生应用菜单 + 快捷键（Wails keys）
-func buildMenu(app *App) *menu.Menu {
-	m := menu.NewMenu()
-
-	file := m.AddSubmenu("文件")
-	file.AddText("打开 Web 界面（浏览器）", keys.CmdOrCtrl("o"), func(_ *menu.CallbackData) {
-		_ = app.OpenWeb()
-	})
-	file.AddText("显示/隐藏窗口", keys.CmdOrCtrl("h"), func(_ *menu.CallbackData) {
-		app.ToggleWindow()
-	})
-	file.AddSeparator()
-	file.AddText("打开数据目录", keys.CmdOrCtrl("d"), func(_ *menu.CallbackData) {
-		_ = app.OpenDataDir()
-	})
-	file.AddText("打开模型目录", keys.CmdOrCtrl("m"), func(_ *menu.CallbackData) {
-		_ = app.OpenModelsDir()
-	})
-	file.AddSeparator()
-	file.AddText("退出", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
-		app.Quit()
-	})
-
-	help := m.AddSubmenu("帮助")
-	help.AddText("关于", nil, func(_ *menu.CallbackData) {
-		app.About()
-	})
-	return m
 }
 
 // mustReadAsset 读内嵌资源（编译期就存在，失败即 panic，避免带着坏页面启动）

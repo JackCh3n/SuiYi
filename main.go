@@ -200,7 +200,7 @@ func run(o appOptions) int {
 		go tray.Run(tray.Options{
 			Icon:    trayIcon,
 			Tooltip: "随译 SuiYi · 本地翻译服务",
-			OnReady: func() { close(trayReady) },
+			OnReady: func() { close(trayReady); core.Srv.SetTrayEnabled(true) },
 			OnShow: func() {
 				if o.window {
 					select {

@@ -22,6 +22,7 @@ import (
 
 // Server HTTP 服务
 type Server struct {
+	trayOn    bool // 系统托盘是否启用（main 注入；「关闭窗口」按钮据此决定隐藏还是退出）
 	cfg       *config.Config
 	completer engine.Completer // 当前推理后端
 	eng       *engine.Engine   // 本地 llama 引擎（仅 local 后端非空）
@@ -49,6 +50,13 @@ func (s *Server) SetSwitchFn(fn func(modelPath string) (*BackendSwitch, error)) 
 // SetHotkeyFn 注入全局快捷键变更回调（由 main 提供，保存即生效）
 func (s *Server) SetHotkeyFn(fn func(combo string) error) {
 	s.hotkeyFn = fn
+}
+
+// SetTrayEnabled 注入托盘状态（自绘标题栏的关闭按钮：有托盘=隐藏，无托盘=退出）
+func (s *Server) SetTrayEnabled(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trayOn = on
 }
 
 // New 创建 API 服务
@@ -137,10 +145,19 @@ func readJSON(r *http.Request, v any) error {
 // ---- 各接口 ----
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	trayOn := s.trayOn
+	s.mu.Unlock()
 	resp := map[string]any{
 		"status":  "ok",
 		"backend": s.cfg.Backend,
 		"pending": s.q.Pending(),
+		"tray":    trayOn,
+		// 自绘标题栏与「关于」弹窗用：打开数据/模型目录（file:// 由 Wails runtime 打开资源管理器）
+		"paths": map[string]string{
+			"data":   config.DataDir(),
+			"models": config.Resolve("models"),
+		},
 	}
 	if s.cfg.Backend == "openai" {
 		// OpenAI 兼容后端：有配置即视为可用

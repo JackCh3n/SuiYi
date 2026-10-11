@@ -6,6 +6,17 @@
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
 <style>
+  /* 无边框窗口：顶部一条自绘标题栏（拖拽 + 窗口按钮），与主界面一致 */
+  .titlebar{position:fixed;top:0;left:0;right:0;height:38px;display:flex;align-items:center;
+       padding:0 12px 0 20px;background:#f5f6fa;border-bottom:1px solid #e5e6eb;z-index:10;
+       --wails-draggable:drag;user-select:none}
+  .titlebar .tb-title{font-size:12px;color:#8a9099;flex:1}
+  .tb-btns{display:flex;gap:2px;--wails-draggable:no-drag}
+  .tb-btn{width:40px;height:28px;border:none;border-radius:6px;background:transparent;color:#646a73;
+       font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .tb-btn:hover{background:#eef1f6;color:#1f2329}
+  .tb-btn svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1.4}
+  .tb-close:hover{background:#e81123;color:#fff}
   body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:#f5f6fa;color:#646a73;
        display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
   div{text-align:center;max-width:440px}
@@ -19,6 +30,14 @@
 </style>
 </head>
 <body>
+<div class="titlebar">
+  <span class="tb-title">随译 SuiYi</span>
+  <span class="tb-btns">
+    <button class="tb-btn" id="tbMin" title="最小化"><svg viewBox="0 0 12 12"><line x1="1" y1="6" x2="11" y2="6"/></svg></button>
+    <button class="tb-btn" id="tbMax" title="最大化 / 还原"><svg viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" rx="1"/></svg></button>
+    <button class="tb-btn tb-close" id="tbClose" title="关闭"><svg viewBox="0 0 12 12"><line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/></svg></button>
+  </span>
+</div>
 <div>
   <div class="logo">译</div>
   <h2>随译 SuiYi</h2>
@@ -73,6 +92,16 @@
   };
   connect();
 })();
+  // 窗口按钮（runtime 由 Wails asset server 自动注入到本页）
+  if(window.runtime){
+    document.getElementById('tbMin').onclick = () => window.runtime.WindowMinimise();
+    document.getElementById('tbMax').onclick = () => window.runtime.WindowToggleMaximise();
+    document.getElementById('tbClose').onclick = () => window.runtime.WindowHide();
+    document.querySelector('.titlebar').addEventListener('dblclick', e => {
+      if(e.target.closest('button')) return;
+      window.runtime.WindowToggleMaximise();
+    });
+  }
 </script>
 </body>
 </html>

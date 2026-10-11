@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>随译 SuiYi · 本地翻译服务</title>
+  <!-- Wails 窗口能力：ipc.js 定义 window.WailsInvoke（消息桥），runtime.js 是 runtime 本体；
+       Wails 给自家页面注入的也是这两个，顺序必须 ipc 在前（runtime 加载完立即发消息）。
+       wails.localhost 由 WebView2 资源过滤器拦截；普通浏览器里加载失败，页面自动降级 -->
+  <script defer src="http://wails.localhost/wails/ipc.js"></script>
+  <script defer src="http://wails.localhost/wails/runtime.js"></script>
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
 <style>
@@ -20,8 +25,19 @@
   --hover:#262b33; --shadow:0 1px 4px rgba(0,0,0,.4);
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);transition:background .2s,color .2s}
-.header{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;background:var(--card);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10}
+body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);transition:background .2s,color .2s;margin:0}
+.header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 10px 24px;background:var(--card);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10}
+/* 无边框窗口：header 即标题栏（拖拽区）。Wails 的拖拽只看事件目标元素的计算样式，
+   所以非交互的子元素也要带上 drag，交互元素（按钮/下拉）显式 no-drag */
+.header,.header .brand,.header h1,.header .sub,.header .pill,.header .right>*{--wails-draggable:drag}
+.header button,.header select{--wails-draggable:no-drag}
+.win-btns{display:none;flex:none;gap:2px;margin-left:10px}
+.in-shell .win-btns{display:flex}
+.win-btn{width:40px;height:30px;border:none;border-radius:6px;background:transparent;color:var(--sub);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;--wails-draggable:no-drag}
+.win-btn:hover{background:var(--hover);color:var(--text)}
+.win-btn:active{opacity:.7}
+.win-btn svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1.4}
+.win-close:hover{background:#e81123;color:#fff}
 .logo{display:flex;align-items:center;gap:10px}
 .logo .icon{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#3370ff,#00b42a);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px}
 .logo h1{font-size:17px;font-weight:600}
@@ -163,6 +179,11 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     <span class="pill" id="enginePill"><span class="dot"></span><span id="engineText">引擎检查中</span></span>
     <button class="theme-btn" id="helpBtn" title="快捷键帮助">⌨ 快捷键</button>
     <button class="theme-btn" id="themeBtn" title="切换亮色 / 暗色">🌙 暗色</button>
+    <span class="win-btns">
+      <button class="win-btn" id="winMin" title="最小化"><svg viewBox="0 0 12 12"><line x1="1" y1="6" x2="11" y2="6"/></svg></button>
+      <button class="win-btn" id="winMax" title="最大化 / 还原"><svg viewBox="0 0 12 12" id="winMaxIcon"><rect x="1.5" y="1.5" width="9" height="9" rx="1"/></svg></button>
+      <button class="win-btn win-close" id="winClose" title="关闭"><svg viewBox="0 0 12 12"><line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/></svg></button>
+    </span>
   </div>
 </header>
 
@@ -365,6 +386,8 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       <div class="about-foot">
         <span class="about-hint">点击地址 / 模型可复制 · Esc 关闭</span>
         <span class="about-actions">
+          <button class="btn ghost" id="aboutData" style="display:none">数据目录</button>
+          <button class="btn ghost" id="aboutModels" style="display:none">模型目录</button>
           <button class="btn ghost" id="aboutOpenWeb">在浏览器打开</button>
           <button class="btn" id="aboutOk">知道了</button>
         </span>
@@ -980,6 +1003,69 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     if(t.dataset.pane === 'p-logs') loadLogs(); // 切到日志页自动加载
   });
 
+  /* ============ 窗口外壳（无边框自绘标题栏） ============ */
+  /* Wails runtime 只在桌面窗口里可用（head 里加载 wails.localhost 的 runtime.js）；
+     普通浏览器里加载失败 → body 不加 in-shell，窗口按钮隐藏、外壳快捷键不注册。 */
+  const inShell = () => !!window.runtime && !!window.wails;
+  const shellPaths = () => (lastHealth && lastHealth.paths) || {};
+  // runtime.js 是 defer 脚本：在 DOMContentLoaded 之前执行完，这里必须等它
+  const initShell = () => { if(inShell()) document.body.classList.add('in-shell'); };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initShell);
+  else initShell();
+
+  const fileURL = dir => 'file:///' + String(dir || '').replace(/\\/g, '/').replace(/^([A-Za-z]):/, '$1:').replace(/\/$/, '');
+  const openDir = dir => { if(dir) window.runtime.BrowserOpenURL(fileURL(dir)); };
+
+  const setupWinBtns = () => {
+    if(!inShell()) return;
+    // 拖拽兜底：runtime 的原生拖拽（mousedown→"drag"→WM_NCLBUTTONDOWN）在个别环境可能失效，
+    // 检测「鼠标移动了但窗口位置没变」时改用 WindowSetPosition 自己拖（无 Win+方向吸附，但保证可拖）
+    $('.header').addEventListener('mousedown', e => {
+      if(e.target.closest('button,select')) return;
+      const sx = e.screenX, sy = e.screenY;
+      const wx = window.screenX, wy = window.screenY;
+      let native = false, took = false;
+      const move = ev => {
+        if(native) return;
+        const dx = ev.screenX - sx, dy = ev.screenY - sy;
+        if(!took && Math.abs(dx) + Math.abs(dy) < 8) return;
+        took = true;
+        if(window.screenX !== wx || window.screenY !== wy){ native = true; return; }
+        window.runtime.WindowSetPosition(wx + dx, wy + dy);
+      };
+      const up = () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    });
+    $('#winMin').onclick = () => window.runtime.WindowMinimise();
+    $('#winMax').onclick = () => { window.runtime.WindowToggleMaximise(); syncMaxIcon(); };
+    // 关闭 = 隐藏到托盘（与原生 ✕ 行为一致）；无托盘时退出
+    $('#winClose').onclick = () => {
+      if(lastHealth.tray) window.runtime.WindowHide();
+      else window.runtime.Quit();
+    };
+    // 双击标题栏切换最大化（原生窗口的默认行为）
+    $('.header').addEventListener('dblclick', e => {
+      if(e.target.closest('button,select')) return;
+      window.runtime.WindowToggleMaximise(); syncMaxIcon();
+    });
+    const syncMaxIcon = () => {
+      window.runtime.WindowIsMaximised().then(max => {
+        $('#winMaxIcon').innerHTML = max
+          ? '<rect x="1.5" y="3.5" width="7" height="7" rx="1"/><path d="M3.5 3.5V1.5h7v7H8.5"/>'
+          : '<rect x="1.5" y="1.5" width="9" height="9" rx="1"/>';
+        $('#winMax').title = max ? '还原' : '最大化';
+      }).catch(() => {});
+    };
+    window.addEventListener('resize', () => syncMaxIcon());
+    syncMaxIcon();
+  };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupWinBtns);
+  else setupWinBtns();
+
   /* ============ 关于弹窗 ============ */
   /* Go 侧（窗口菜单「帮助→关于」）通过 WindowExecJS 注入版本/平台/启动时间；
      后端/模型/引擎状态由页面已有的配置与健康检查数据填充。 */
@@ -1008,6 +1094,12 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   $('#aboutX').onclick = closeAbout;
   $('#aboutOk').onclick = closeAbout;
   $('#aboutOpenWeb').onclick = () => { window.open(location.href, '_blank'); closeAbout(); };
+  if(inShell()){
+    $('#aboutData').style.display = '';
+    $('#aboutModels').style.display = '';
+    $('#aboutData').onclick = () => openDir(shellPaths().data);
+    $('#aboutModels').onclick = () => openDir(shellPaths().models);
+  }
   $('#aboutMask').onclick = e => { if(e.target === $('#aboutMask')) closeAbout(); };
   $('#abURL').onclick = async () => { try{ await navigator.clipboard.writeText($('#abURL').textContent); toast('已复制服务地址'); }catch(e){} };
   $('#abModel').onclick = async () => { try{ await navigator.clipboard.writeText($('#abModel').textContent); toast('已复制模型名'); }catch(e){} };
@@ -1033,12 +1125,13 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       ['Home / End', '跳到内容最上 / 最下'],
       ['PageUp / PageDown', '上一页 / 下一页（约一屏）'],
     ]],
-    ['窗口（原生菜单）', [
+    ['窗口', [
       ['Ctrl + O', '在浏览器打开管理界面'],
-      ['Ctrl + H', '显示 / 隐藏窗口'],
+      ['Ctrl + H', '隐藏窗口（托盘 / 全局快捷键唤回）'],
       ['Ctrl + D', '打开数据目录'],
       ['Ctrl + M', '打开模型目录'],
       ['Ctrl + Q', '退出'],
+      ['双击标题栏', '最大化 / 还原'],
     ]],
     ['全局（系统级，设置页「全局快捷键」开启）', [
       ['如 Alt + F', '任何程序在前台时按下：显示主窗口，并把剪贴板内容填入原文自动翻译'],
@@ -1077,6 +1170,18 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     if(e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.key === 'Enter'){
       e.preventDefault(); clearTimeout(debounce); doTranslate();
       return;
+    }
+    // 原生菜单快捷键迁移（无边框窗口没有原生菜单）：仅窗口内生效
+    if(e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && inShell()){
+      const acts = {
+        o: () => window.runtime.BrowserOpenURL(location.origin + '/'),
+        h: () => window.runtime.WindowHide(),
+        d: () => openDir(shellPaths().data),
+        m: () => openDir(shellPaths().models),
+        q: () => window.runtime.Quit(),
+      };
+      const k = (e.key || '').toLowerCase();
+      if(acts[k]){ e.preventDefault(); acts[k](); return; }
     }
     if(e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey){
       const click = id => () => $(id).click();
