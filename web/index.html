@@ -35,6 +35,26 @@ body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;backgroun
 .theme-btn{cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--text);padding:6px 12px;border-radius:8px;font-size:13px;display:flex;align-items:center;gap:6px}
 .theme-btn:hover{background:var(--hover)}
 kbd{background:var(--bg);border:1px solid var(--border);border-bottom-width:2px;border-radius:4px;padding:1px 6px;font-family:inherit;font-size:12px;white-space:nowrap;color:var(--text)}
+.about-card{background:var(--card);border:1px solid var(--border);border-radius:16px;max-width:460px;width:calc(100vw - 48px);overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.20)}
+.about-hero{position:relative;padding:22px 24px 18px;background:linear-gradient(135deg,rgba(51,112,255,.10),rgba(0,180,42,.10));border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px}
+.about-logo{width:52px;height:52px;line-height:52px;border-radius:14px;flex:none;text-align:center;color:#fff;font-size:24px;font-weight:700;background:linear-gradient(135deg,#3370ff,#00b42a);box-shadow:0 4px 14px rgba(51,112,255,.35)}
+.about-card h2{font-size:18px;margin:0;color:var(--text);letter-spacing:.5px}
+.about-sub{font-size:12px;color:var(--sub);margin-top:2px}
+.about-close{position:absolute;top:10px;right:10px;width:28px;height:28px;border:none;border-radius:8px;background:transparent;color:var(--sub);font-size:14px;cursor:pointer}
+.about-close:hover{background:var(--hover);color:var(--text)}
+.about-body{padding:14px 24px 4px}
+.about-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px dashed var(--border);font-size:13px}
+.about-row:last-child{border-bottom:none}
+.about-row>span{width:74px;flex:none;color:var(--sub)}
+.about-row>span::after{content:'：'}
+.about-row b{color:var(--text);font-weight:500;word-break:break-all}
+.about-row .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;flex:none}
+.about-row .dot.ok{background:#00b42a}.about-row .dot.warm{background:#ff7d00}.about-row .dot.err{background:#f53f3f}
+.about-row code{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer;transition:.15s}
+.about-row code:hover{border-color:var(--primary);color:var(--primary)}
+.about-foot{display:flex;align-items:center;justify-content:space-between;padding:14px 24px 18px;gap:10px}
+.about-hint{font-size:11px;color:var(--sub)}
+.about-actions{display:flex;gap:8px}
 .help-mask{position:fixed;inset:0;background:rgba(0,0,0,.38);display:flex;align-items:center;justify-content:center;z-index:60}
 .help-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 22px;max-width:560px;width:calc(100vw - 48px);max-height:82vh;overflow:auto;box-shadow:0 10px 36px rgba(0,0,0,.18)}
 .help-card h2{font-size:15px;margin:0 0 6px}
@@ -323,12 +343,42 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
 <div class="footer">随译 SuiYi · 腾讯 Hy-MT2-1.8B · 本地离线 / OpenAI 兼容多后端</div>
 <div class="toast" id="toast"></div>
 
+  <!-- 关于 -->
+  <div class="help-mask" id="aboutMask" style="display:none">
+    <div class="about-card">
+      <div class="about-hero">
+        <div class="about-logo">译</div>
+        <div>
+          <h2>随译 SuiYi</h2>
+          <div class="about-sub">轻量 · 本地离线 · 隐私不出本机</div>
+        </div>
+        <button class="about-close" id="aboutX" title="关闭">✕</button>
+      </div>
+      <div class="about-body">
+        <div class="about-row"><span>当前后端</span><b id="abBackend">—</b></div>
+        <div class="about-row"><span>引擎状态</span><b><span class="dot" id="abDot"></span><span id="abEngine">—</span></b></div>
+        <div class="about-row"><span>推理模型</span><b id="abModel">—</b></div>
+        <div class="about-row"><span>服务地址</span><b><code id="abURL" title="点击复制">—</code></b></div>
+        <div class="about-row"><span>版本</span><b id="abVersion">—</b></div>
+        <div class="about-row"><span>本次启动</span><b id="abStarted">—</b></div>
+      </div>
+      <div class="about-foot">
+        <span class="about-hint">点击地址 / 模型可复制 · Esc 关闭</span>
+        <span class="about-actions">
+          <button class="btn ghost" id="aboutOpenWeb">在浏览器打开</button>
+          <button class="btn" id="aboutOk">知道了</button>
+        </span>
+      </div>
+    </div>
+  </div>
+
   <!-- 快捷键帮助 -->
   <div class="help-mask" id="helpMask" style="display:none">
     <div class="help-card">
       <h2>⌨ 快捷键</h2>
       <div id="helpBody"></div>
-      <div style="text-align:right;margin-top:14px">
+      <div style="text-align:right;margin-top:14px;display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn ghost" id="helpAbout">关于随译</button>
         <button class="btn" id="helpClose">知道了（Esc）</button>
       </div>
     </div>
@@ -393,6 +443,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
       const r = await fetch('/health');
       const d = await r.json();
       backend = d.backend || 'local';
+      lastHealth = d;
       const pill = $('#enginePill'), txt = $('#engineText');
       pill.className = 'pill ' + (d.engine ? 'ok' : 'warm');
       txt.textContent = backend === 'openai'
@@ -723,6 +774,7 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   async function loadConfig(){
     try{
       const d = await (await fetch('/config')).json();
+      lastConfig = d;
       const target = d.target_lang || 'zh';
       $('#cfgTarget').value = target;
       $('#dstLang').value = target;      // 翻译页默认目标语言跟随配置
@@ -928,6 +980,38 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
     if(t.dataset.pane === 'p-logs') loadLogs(); // 切到日志页自动加载
   });
 
+  /* ============ 关于弹窗 ============ */
+  /* Go 侧（窗口菜单「帮助→关于」）通过 WindowExecJS 注入版本/平台/启动时间；
+     后端/模型/引擎状态由页面已有的配置与健康检查数据填充。 */
+  let aboutMeta = {};          // Go 注入的部分
+  let lastHealth = {};         // checkHealth 的最近一次结果
+  let lastConfig = {};         // loadConfig 的最近一次结果
+  const backendName = () => ({ openai: 'OpenAI 兼容 API', hunyuan: '腾讯混元翻译',
+                               hymt: 'hy-mt 引擎' })[backend] || '本地 llama.cpp';
+  const openAbout = () => {
+    const engTxt = lastHealth.engine === true ? '就绪'
+                 : lastHealth.engine === false ? '加载中 / 不可用' : '—';
+    $('#abBackend').textContent = backendName();
+    $('#abEngine').textContent = engTxt;
+    $('#abDot').className = 'dot ' + (lastHealth.engine ? 'ok' : 'warm');
+    const model = lastConfig.model_path ? lastConfig.model_path.split(/[\/]/).pop()
+                : (lastConfig.openai_model || '—');
+    $('#abModel').textContent = model;
+    $('#abModel').title = lastConfig.model_path || lastConfig.openai_model || '';
+    $('#abURL').textContent = (aboutMeta.apiURL || ('http://127.0.0.1:' + location.port));
+    $('#abVersion').textContent = 'v' + (aboutMeta.version || 'dev') + ' · ' + (aboutMeta.platform || '');
+    $('#abStarted').textContent = aboutMeta.started || '—';
+    $('#aboutMask').style.display = '';
+  };
+  const closeAbout = () => { $('#aboutMask').style.display = 'none'; };
+  window.suiyiAbout = function(info){ Object.assign(aboutMeta, info || {}); openAbout(); };
+  $('#aboutX').onclick = closeAbout;
+  $('#aboutOk').onclick = closeAbout;
+  $('#aboutOpenWeb').onclick = () => { window.open(location.href, '_blank'); closeAbout(); };
+  $('#aboutMask').onclick = e => { if(e.target === $('#aboutMask')) closeAbout(); };
+  $('#abURL').onclick = async () => { try{ await navigator.clipboard.writeText($('#abURL').textContent); toast('已复制服务地址'); }catch(e){} };
+  $('#abModel').onclick = async () => { try{ await navigator.clipboard.writeText($('#abModel').textContent); toast('已复制模型名'); }catch(e){} };
+
   /* ============ 快捷键 ============ */
   /* 帮助面板数据（与下面的分发器保持一致；列表由它渲染，改这里即可同步） */
   const HELP_GROUPS = [
@@ -972,10 +1056,16 @@ td .copy{cursor:pointer;color:var(--primary);font-size:12px;margin-left:8px;user
   const closeHelp = () => { $('#helpMask').style.display = 'none'; };
   $('#helpBtn').onclick = openHelp;
   $('#helpClose').onclick = closeHelp;
+  $('#helpAbout').onclick = () => { closeHelp(); openAbout(); };
   $('#helpMask').onclick = e => { if(e.target === $('#helpMask')) closeHelp(); };
 
   /* 快捷键分发器：Alt+字母复用现有按钮（零重复实现）；Ctrl+Enter 立即翻译；Esc 停止/关面板 */
   window.addEventListener('keydown', e => {
+    const aboutOpen = () => $('#aboutMask').style.display !== 'none';
+    if(aboutOpen()){
+      if(e.key === 'Escape'){ closeAbout(); e.preventDefault(); }
+      return;                       // 关于弹窗打开时不响应其它快捷键
+    }
     if(helpOpen()){
       if(e.key === 'Escape'){ closeHelp(); e.preventDefault(); }
       return;                       // 面板打开时不响应其它快捷键

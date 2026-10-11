@@ -56,7 +56,7 @@ var currentApp *App
 
 // Run 启动窗口（阻塞，须在主 goroutine 调用；窗口退出后返回）
 func Run(o Options) error {
-	app := &App{apiURL: o.APIURL, version: o.Version, ready: make(chan struct{})}
+	app := &App{apiURL: o.APIURL, version: o.Version, startedAt: time.Now(), ready: make(chan struct{})}
 	currentApp = app
 
 	// 把真实地址注入首页（端口可配置，页面上不再有写死的 8848）

@@ -4,8 +4,12 @@ package gui
 
 import (
 	"context"
+	"encoding/json"
 	"os/exec"
+	"runtime"
+	"strings"
 	"sync"
+	"time"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -14,10 +18,11 @@ import (
 
 // App Wails 绑定对象（前端可通过 window.go.main.App.* 调用）
 type App struct {
-	ctx     context.Context
-	apiURL  string
-	version string
-	ready   chan struct{} // startup 完成后关闭，供后台 goroutine 安全使用 ctx
+	ctx       context.Context
+	apiURL    string
+	version   string
+	startedAt time.Time     // 窗口启动时间（「关于」弹窗展示）
+	ready     chan struct{} // startup 完成后关闭，供后台 goroutine 安全使用 ctx
 
 	mu      sync.Mutex
 	visible bool // 窗口是否可见（用于菜单「显示/隐藏」）
@@ -82,13 +87,37 @@ func (a *App) Quit() { wruntime.Quit(a.ctx) }
 
 // About 显示关于对话框（菜单「帮助→关于」）
 func (a *App) About() {
-	_, _ = wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
-		Title: "关于 随译 SuiYi",
-		Message: "随译 SuiYi · 本地翻译服务\n\n" +
-			"版本: " + a.version + "\n" +
-			"GUI: Wails v2.12 + WebView2\n" +
-			"推理: llama.cpp（本地离线 / OpenAI 兼容 API）\n\n" +
-			"Web 界面: " + a.apiURL,
-		Buttons: []string{"确定"},
-	})
+	// 页面里有一个自绘「关于」弹窗（跟随亮/暗主题、路径可点复制），原生 MessageDialog 无法定制样式。
+	// 这里只注入 Go 侧才知道的信息（版本/平台/启动时间/服务地址），后端/模型/引擎状态由页面自己取。
+	info := aboutInfo{
+		Version:  a.version,
+		Platform: runtime.GOOS + "/" + runtime.GOARCH + " · " + goVersion(),
+		APIURL:   a.apiURL,
+		Started:  a.startedAt.Format("2006-01-02 15:04"),
+	}
+	raw, err := json.Marshal(info)
+	if err != nil {
+		return
+	}
+	// 窗口刚创建时页面可能还停在启动页（还没有 suiyiAbout），最多重试 2 秒
+	js := "(function(t){var i=0,p=function(){if(window.suiyiAbout){window.suiyiAbout(t);return;}" +
+		"if(++i<8)setTimeout(p,250)};p()})(" + string(raw) + ")"
+	wruntime.WindowExecJS(a.ctx, js)
+}
+
+// aboutInfo Go 侧注入给「关于」弹窗的信息（其余字段页面自己取）
+type aboutInfo struct {
+	Version  string `json:"version"`
+	Platform string `json:"platform"`
+	APIURL   string `json:"apiURL"`
+	Started  string `json:"started"`
+}
+
+// goVersion 精简的 Go 版本号（去掉 "windows/amd64" 之类后缀）
+func goVersion() string {
+	v := runtime.Version()
+	if i := strings.Index(v, " "); i > 0 {
+		v = v[:i]
+	}
+	return v
 }
